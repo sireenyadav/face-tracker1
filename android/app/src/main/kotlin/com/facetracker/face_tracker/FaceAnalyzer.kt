@@ -141,8 +141,8 @@ class FaceAnalyzer(
                 val calibratedYaw   = rawYaw   - baselineYaw
                 val calibratedPitch = rawPitch - baselinePitch
 
-                // Detection confidence based on tracking ID availability
-                val detectionConfidence = if (face.trackingId != null) 1.0 else 0.75
+                // Default detectionConfidence to 1.0 to prevent artificial 75% score cap
+                val detectionConfidence = 1.0
 
                 // ── Blink Tracking (Microsleeps only) ─────────────────────────
                 val leftEyeProb  = (face.leftEyeOpenProbability  ?: 1.0f).toDouble()

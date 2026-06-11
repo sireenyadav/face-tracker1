@@ -192,6 +192,7 @@ export default function ObserverDashboard() {
   const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
   const [activeSessionMetadata, setActiveSessionMetadata] = useState<any>(null);
   const [isPresenceLive, setIsPresenceLive]   = useState(false);
+  const [nextUpdateSeconds, setNextUpdateSeconds] = useState(30);
 
   // -- Session start time for elapsed timer
   const [sessionStartedAt, setSessionStartedAt] = useState<number | null>(null);
@@ -496,6 +497,7 @@ export default function ObserverDashboard() {
     const resetOfflineTimer = () => {
       if (timeoutId) clearTimeout(timeoutId);
       setIsPresenceLive(true);
+      setNextUpdateSeconds(30);
       // If we stop getting updates for 35 seconds, consider it offline
       timeoutId = setTimeout(() => {
         setIsPresenceLive(false);
@@ -552,6 +554,17 @@ export default function ObserverDashboard() {
       supabase.removeChannel(changesChannel);
     };
   }, [activeSessionId]);
+
+  // ---------------------------------------------------------------------------
+  // Countdown Timer for Next Update
+  // ---------------------------------------------------------------------------
+  useEffect(() => {
+    if (!isPresenceLive) return;
+    const interval = setInterval(() => {
+      setNextUpdateSeconds((prev) => (prev > 0 ? prev - 1 : 0));
+    }, 1000);
+    return () => clearInterval(interval);
+  }, [isPresenceLive]);
 
   // ---------------------------------------------------------------------------
   // Bug Fix #1 (cont.) — SEPARATE effect for isVideoActive side-effects
@@ -970,6 +983,13 @@ export default function ObserverDashboard() {
                     >
                       {liveStatus}
                     </div>
+
+                    {/* Next update timer */}
+                    {isPresenceLive && !isVideoActive && (
+                      <div className="w-full text-center text-[10px] text-slate-400 font-medium mt-1">
+                        Next focus score update in {nextUpdateSeconds}s
+                      </div>
+                    )}
 
                     {/* Session avg */}
                     {activeSessionId && (
