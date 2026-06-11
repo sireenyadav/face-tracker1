@@ -20,7 +20,7 @@ export const FaceTrackerEdge: React.FC<FaceTrackerEdgeProps> = ({ videoRef, isAc
       try {
         await tf.ready();
         const model = faceDetection.SupportedModels.MediaPipeFaceDetector;
-        const detectorConfig: faceDetection.MediaPipeFaceDetectorMediaPipeDetectorOptions = {
+        const detectorConfig: any = {
           runtime: 'tfjs',
           maxFaces: 1,
         };
