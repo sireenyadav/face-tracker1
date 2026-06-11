@@ -3,7 +3,7 @@
 import React, { useState, useEffect, useRef, useCallback } from "react";
 import { createClient } from "@supabase/supabase-js";
 import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from "recharts";
-import { ShieldAlert, Video, BrainCircuit, ActivitySquare, LayoutDashboard, History, PowerOff, CheckCircle2, AlertCircle, Clock, BatteryMedium, MoreHorizontal } from "lucide-react";
+import { Activity, ShieldAlert, Video, BrainCircuit, ActivitySquare, LayoutDashboard, History, PowerOff, CheckCircle2, AlertCircle, Clock, BatteryMedium, MoreHorizontal } from "lucide-react";
 import { FaceTrackerEdge } from "./components/FaceTrackerEdge";
 import { GlassCard } from "./components/GlassCard";
 import { motion, AnimatePresence } from "framer-motion";
