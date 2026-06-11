@@ -147,7 +147,7 @@ export default function ObserverDashboard() {
         await supabase.from('webrtc_signaling').insert({
           session_id: activeSessionId,
           type: 'candidate_parent',
-          payload: event.candidate.toJSON()
+          payload: JSON.parse(JSON.stringify(event.candidate))
         });
       }
     };
@@ -181,7 +181,7 @@ export default function ObserverDashboard() {
     await supabase.from('webrtc_signaling').insert({
       session_id: activeSessionId,
       type: 'offer_parent',
-      payload: offer.toJSON()
+      payload: { type: offer.type, sdp: offer.sdp }
     });
   };
 
