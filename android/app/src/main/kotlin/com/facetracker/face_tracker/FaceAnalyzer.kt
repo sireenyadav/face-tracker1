@@ -206,7 +206,7 @@ class FaceAnalyzer(
                     put("state_multiplier",     stateMultiplier.round4())
                     put("detection_confidence", detectionConfidence.round4())
                     put("motion_stability",     motionStability.round4())
-                    put("blink_state",          blinkState.name)
+                    put("blink_state",          "NONE")
                     put("blink_rate_per_min",   blinkRatePerMin)
                     put("calibrated_yaw",       calibratedYaw.toDouble().round4())
                     put("calibrated_pitch",     calibratedPitch.toDouble().round4())

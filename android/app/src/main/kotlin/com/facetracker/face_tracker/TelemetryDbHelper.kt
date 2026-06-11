@@ -17,8 +17,8 @@ class TelemetryDbHelper(context: Context) : SQLiteOpenHelper(context, DATABASE_N
         const val TABLE_TELEMETRY = "telemetry_logs"
     }
 
-    override fun onCreate(db: SQLiteDatabase) {
-        db.execSQL("""
+    override fun onCreate(db: SQLiteDatabase?) {
+        db?.execSQL("""
             CREATE TABLE $TABLE_SESSIONS (
                 id TEXT PRIMARY KEY,
                 subject_tag TEXT,
@@ -32,6 +32,7 @@ class TelemetryDbHelper(context: Context) : SQLiteOpenHelper(context, DATABASE_N
             )
         """)
 
+        db?.execSQL("""
             CREATE TABLE $TABLE_TELEMETRY (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 session_id TEXT,
@@ -48,10 +49,12 @@ class TelemetryDbHelper(context: Context) : SQLiteOpenHelper(context, DATABASE_N
         """)
     }
 
-    override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) {
-        db.execSQL("DROP TABLE IF EXISTS $TABLE_TELEMETRY")
-        db.execSQL("DROP TABLE IF EXISTS $TABLE_SESSIONS")
-        onCreate(db)
+    override fun onUpgrade(db: SQLiteDatabase?, oldVersion: Int, newVersion: Int) {
+        db?.execSQL("DROP TABLE IF EXISTS $TABLE_TELEMETRY")
+        db?.execSQL("DROP TABLE IF EXISTS $TABLE_SESSIONS")
+        if (db != null) {
+            onCreate(db)
+        }
     }
 
     fun startSession(sessionId: String, subject: String, exam: String, activity: String, chapter: String, lecture: Int, startedAt: String) {
