@@ -49,3 +49,7 @@ app.*.map.json
 .env.local
 .env.*
 
+
+# Next.js / Dashboard
+dashboard/node_modules/
+dashboard/.next/
