@@ -16,7 +16,8 @@ CREATE TABLE IF NOT EXISTS focus_sessions (
     lecture_number INT,
     started_at TIMESTAMPTZ DEFAULT NOW(),
     ended_at TIMESTAMPTZ,
-    status TEXT DEFAULT 'active'
+    status TEXT DEFAULT 'active',
+    current_live_score INT DEFAULT 100
 );
 
 -- Table: telemetry_logs
@@ -308,4 +309,15 @@ BEGIN
 END;
 $$;
 
-
+-- ==============================================================================
+-- 5. DASHBOARD VIEWS
+-- ==============================================================================
+CREATE VIEW weekly_wellbeing_stats AS
+SELECT 
+    DATE_TRUNC('day', started_at) AS study_date,
+    subject_tag AS subject,
+    SUM(EXTRACT(EPOCH FROM (ended_at - started_at))/3600) AS total_hours
+FROM focus_sessions
+WHERE started_at >= NOW() - INTERVAL '7 days' AND ended_at IS NOT NULL
+GROUP BY study_date, subject_tag
+ORDER BY study_date ASC;

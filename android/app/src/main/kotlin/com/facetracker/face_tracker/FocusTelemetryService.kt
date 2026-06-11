@@ -280,9 +280,16 @@ class FocusTelemetryService : LifecycleService() {
     // Focus update handler (called by FaceAnalyzer callback)
     // ─────────────────────────────────────────────────────────────────────────
 
+    // Add recentScores to compute rolling average
+    private var recentScores = mutableListOf<Int>()
+
     private fun handleFocusUpdate(score: Int, state: String, jsonStr: String) {
         currentFocusScore = score
         currentState      = state
+
+        synchronized(recentScores) {
+            recentScores.add(score)
+        }
 
         val timestamp = utcSdf().format(Date())
 
@@ -413,11 +420,22 @@ class FocusTelemetryService : LifecycleService() {
             dbHelper.markSessionEndSynced(successfullySyncedSessions)
         }
 
-        // ── 3. Keep-alive ping (update last_telemetry_at) ─────────────────────
+        // ── 3. Keep-alive ping (update last_telemetry_at and current_live_score) ─────
         if (sessionId.isNotEmpty()) {
             try {
+                val liveScore = synchronized(recentScores) {
+                    if (recentScores.isNotEmpty()) {
+                        val avg = recentScores.average().toInt()
+                        recentScores.clear()
+                        avg
+                    } else {
+                        currentFocusScore
+                    }
+                }
+
                 val patchPayload = JSONObject().apply {
                     put("last_telemetry_at", utcSdf().format(Date()))
+                    put("current_live_score", liveScore)
                 }.toString()
 
                 val mediaType   = "application/json; charset=utf-8".toMediaType()

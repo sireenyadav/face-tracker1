@@ -394,8 +394,8 @@ class FaceAnalyzer(
         "PHONE_CHECK_SUSPECT"-> 0.20
         "DROWSY"             -> 0.35
         "NECK_STRAIN_ALERT"  -> 0.50
-        "READING_OFFLINE"    -> 0.45
-        "WRITING_OFFLINE"    -> 0.40
+        "READING_OFFLINE"    -> 0.95
+        "WRITING_OFFLINE"    -> 0.90
         else                 -> 0.60   // NEUTRAL_DRIFT
     }
 

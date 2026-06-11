@@ -31,6 +31,9 @@ import { createClient } from "@supabase/supabase-js";
 import {
   AreaChart,
   Area,
+  BarChart,
+  Bar,
+  Legend,
   XAxis,
   YAxis,
   CartesianGrid,
@@ -187,6 +190,7 @@ export default function ObserverDashboard() {
   const [liveStatus, setLiveStatus]           = useState("Waiting for Telemetry…");
   const [currentScore, setCurrentScore]       = useState(0);
   const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
+  const [activeSessionMetadata, setActiveSessionMetadata] = useState<any>(null);
   const [isPresenceLive, setIsPresenceLive]   = useState(false);
 
   // -- Session start time for elapsed timer
@@ -202,6 +206,7 @@ export default function ObserverDashboard() {
   const [totalFocusTime, setTotalFocusTime]   = useState("00:00");
   const [avgConsistency, setAvgConsistency]   = useState(0);
   const [focusDrops, setFocusDrops]           = useState(0);
+  const [weeklyStats, setWeeklyStats]         = useState<any[]>([]);
 
   // -- Notifications tab
   const [notifications, setNotifications] = useState<NotificationEvent[]>([]);
@@ -270,6 +275,11 @@ export default function ObserverDashboard() {
       setSessionStartedAt(
         session.started_at ? new Date(session.started_at).getTime() : null
       );
+      setActiveSessionMetadata({
+        subject_tag: session.subject_tag,
+        chapter_name: session.chapter_name,
+        lecture_number: session.lecture_number,
+      });
 
       const { data: logs } = await supabase
         .from("telemetry_logs")
@@ -356,6 +366,22 @@ export default function ObserverDashboard() {
       );
       setFocusDrops(drops);
     }
+
+    // ── Weekly Wellbeing Stats ─────────────────────────────────────────────
+    const { data: weeklyData } = await supabase
+      .from("weekly_wellbeing_stats")
+      .select("*")
+      .order("study_date", { ascending: true });
+    
+    if (weeklyData && weeklyData.length > 0) {
+      const grouped: Record<string, any> = {};
+      weeklyData.forEach((row: any) => {
+        const dateStr = new Date(row.study_date).toLocaleDateString("en-IN", { weekday: "short" });
+        if (!grouped[dateStr]) grouped[dateStr] = { date: dateStr };
+        grouped[dateStr][row.subject || "Other"] = parseFloat(row.total_hours).toFixed(2);
+      });
+      setWeeklyStats(Object.values(grouped));
+    }
   }, []);
 
   // ---------------------------------------------------------------------------
@@ -420,6 +446,11 @@ export default function ObserverDashboard() {
                 ? new Date(newSession.started_at).getTime()
                 : Date.now()
             );
+            setActiveSessionMetadata({
+              subject_tag: newSession.subject_tag,
+              chapter_name: newSession.chapter_name,
+              lecture_number: newSession.lecture_number,
+            });
             setLiveStatus("Waiting for Telemetry…");
             setChartData([]);
             setCurrentScore(0);
@@ -438,6 +469,7 @@ export default function ObserverDashboard() {
             setActiveSessionId(null);
             activeSessionIdRef.current = null;
             setSessionStartedAt(null);
+            setActiveSessionMetadata(null);
             // Refresh stats after session ends
             fetchInitialData();
           }
@@ -494,6 +526,21 @@ export default function ObserverDashboard() {
             } else {
               // Valid ping
               resetOfflineTimer();
+              if (payload.new.current_live_score != null && !isVideoActiveRef.current) {
+                const score = payload.new.current_live_score;
+                const point: ChartPoint = {
+                  timestamp: Date.now(),
+                  time: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
+                  focus_score: score,
+                };
+                setChartData((prev) => {
+                  const updatedData = [...prev, point];
+                  if (updatedData.length > 60) updatedData.shift();
+                  return updatedData;
+                });
+                setCurrentScore(score);
+                setLiveStatus("Online (Live Score)");
+              }
             }
           }
         }
@@ -971,12 +1018,21 @@ export default function ObserverDashboard() {
                               className="w-full h-full object-cover"
                             />
                           </div>
-                          <span
-                            className="text-white font-semibold"
-                            style={{ fontFamily: '"Playfair Display", serif' }}
-                          >
-                            Sireen Yadav
-                          </span>
+                          <div className="flex flex-col">
+                            <span
+                              className="text-white font-semibold"
+                              style={{ fontFamily: '"Playfair Display", serif' }}
+                            >
+                              Sireen Yadav
+                            </span>
+                            {activeSessionMetadata && (
+                              <span className="text-[10px] text-cyan-400 font-medium">
+                                {activeSessionMetadata.subject_tag || "Session"}
+                                {activeSessionMetadata.chapter_name ? ` • ${activeSessionMetadata.chapter_name}` : ""}
+                                {activeSessionMetadata.lecture_number ? ` • L${activeSessionMetadata.lecture_number}` : ""}
+                              </span>
+                            )}
+                          </div>
                         </div>
                       </div>
                       <div
@@ -1358,6 +1414,26 @@ export default function ObserverDashboard() {
                           }}
                         />
                       </div>
+                    </div>
+
+                    {/* Weekly Wellbeing Chart */}
+                    <div className="mt-4 flex-1 min-h-[160px]">
+                      <div className="flex justify-between text-xs mb-2">
+                        <span className="text-slate-500 font-medium">
+                          Weekly Wellbeing (Hours)
+                        </span>
+                      </div>
+                      <ResponsiveContainer width="100%" height="100%">
+                        <BarChart data={weeklyStats} margin={{ top: 0, right: 0, left: -20, bottom: 0 }}>
+                          <XAxis dataKey="date" stroke="rgba(255,255,255,0.2)" fontSize={10} tickMargin={8} />
+                          <YAxis stroke="rgba(255,255,255,0.2)" fontSize={10} />
+                          <Tooltip content={<CustomTooltip />} />
+                          <Bar dataKey="Physics" stackId="a" fill="#22d3ee" radius={[0, 0, 4, 4]} />
+                          <Bar dataKey="Maths" stackId="a" fill="#818cf8" />
+                          <Bar dataKey="Chemistry" stackId="a" fill="#34d399" radius={[4, 4, 0, 0]} />
+                          <Bar dataKey="Other" stackId="a" fill="#f472b6" radius={[4, 4, 0, 0]} />
+                        </BarChart>
+                      </ResponsiveContainer>
                     </div>
                   </div>
                 </motion.div>
