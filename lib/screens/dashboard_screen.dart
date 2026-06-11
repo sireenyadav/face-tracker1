@@ -1,13 +1,19 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:flutter_webrtc/flutter_webrtc.dart';
+import 'package:google_fonts/google_fonts.dart';
 import 'package:permission_handler/permission_handler.dart';
+import 'package:provider/provider.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:uuid/uuid.dart';
-import 'dart:io';
-import '../telemetry/webrtc_stream_handler.dart';
+import '../theme/app_theme.dart';
+import '../components/glass_container.dart';
+import '../components/animated_toggle_chip.dart';
+import '../components/premium_text_field.dart';
+import '../components/animated_mesh_background.dart';
+import '../components/study_timeline_card.dart';
 import 'video_ambush_screen.dart';
 
 const Color emeraldColor = Color(0xFF10B981);
@@ -19,8 +25,7 @@ class DashboardScreen extends StatefulWidget {
   State<DashboardScreen> createState() => _DashboardScreenState();
 }
 
-class _DashboardScreenState extends State<DashboardScreen> with SingleTickerProviderStateMixin {
-  // Define the method channel matching the native Kotlin pipeline hooks
+class _DashboardScreenState extends State<DashboardScreen> with TickerProviderStateMixin {
   static const platform = MethodChannel('com.facetracker/control');
   static const telemetryStream = EventChannel('com.facetracker/telemetryStream');
   static const syncStream = EventChannel('com.facetracker/syncStream');
@@ -36,7 +41,6 @@ class _DashboardScreenState extends State<DashboardScreen> with SingleTickerProv
   bool _isSessionActive = false;
   int _elapsedSeconds = 0;
   Timer? _timer;
-  double _currentMemoryMb = 0.0;
   String _currentSessionId = "";
 
   bool _isDbConnected = false;
@@ -47,25 +51,26 @@ class _DashboardScreenState extends State<DashboardScreen> with SingleTickerProv
   final TextEditingController _chapterController = TextEditingController();
   final TextEditingController _lectureController = TextEditingController(text: '1');
   
-  // Animation controller for the pulsing focus effect when active
   late AnimationController _pulseController;
   late Animation<double> _pulseAnimation;
+  
+  int _bottomNavIndex = 0;
+  List<Map<String, dynamic>> _sessionHistory = [];
+  bool _isLoadingHistory = true;
 
   @override
   void initState() {
     super.initState();
     _checkSupabaseConnection();
+    _fetchSessionHistory();
     
     _pulseController = AnimationController(
       vsync: this,
-      duration: const Duration(milliseconds: 1500),
+      duration: const Duration(milliseconds: 2000),
     );
-    _pulseAnimation = Tween<double>(begin: 1.0, end: 1.03).animate(
-      CurvedAnimation(parent: _pulseController, curve: Curves.easeInOut),
+    _pulseAnimation = Tween<double>(begin: 1.0, end: 1.02).animate(
+      CurvedAnimation(parent: _pulseController, curve: Curves.easeInOutSine),
     );
-
-    // Remove old method channel listener
-    // platform.setMethodCallHandler(_handleNativeMethodCall);
   }
 
   void _checkSupabaseConnection() async {
@@ -74,6 +79,25 @@ class _DashboardScreenState extends State<DashboardScreen> with SingleTickerProv
       if (mounted) setState(() { _isDbConnected = true; });
     } catch (e) {
       if (mounted) setState(() { _isDbConnected = false; });
+    }
+  }
+
+  Future<void> _fetchSessionHistory() async {
+    try {
+      final data = await Supabase.instance.client
+          .from('focus_sessions')
+          .select()
+          .order('started_at', ascending: false)
+          .limit(10);
+      
+      if (mounted) {
+        setState(() {
+          _sessionHistory = List<Map<String, dynamic>>.from(data);
+          _isLoadingHistory = false;
+        });
+      }
+    } catch (e) {
+      if (mounted) setState(() => _isLoadingHistory = false);
     }
   }
 
@@ -97,8 +121,9 @@ class _DashboardScreenState extends State<DashboardScreen> with SingleTickerProv
 
   void _triggerVideoAmbushOverlay(String sessionId) {
     Navigator.of(context).push(
-      MaterialPageRoute(
-        builder: (context) => VideoAmbushScreen(sessionId: sessionId),
+      PageRouteBuilder(
+        opaque: false,
+        pageBuilder: (context, animation, secondaryAnimation) => VideoAmbushScreen(sessionId: sessionId),
         fullscreenDialog: true,
       ),
     );
@@ -125,9 +150,6 @@ class _DashboardScreenState extends State<DashboardScreen> with SingleTickerProv
 
   void _toggleSession() async {
     if (_isSessionActive) {
-      // ---------------------------------------------------------
-      // SURRENDER / STOP SESSION LOGIC
-      // ---------------------------------------------------------
       _telemetrySubscription?.cancel();
       _syncSubscription?.cancel();
       _timer?.cancel();
@@ -136,36 +158,56 @@ class _DashboardScreenState extends State<DashboardScreen> with SingleTickerProv
       
       try {
         Supabase.instance.client.removeChannel(Supabase.instance.client.channel('signaling_trigger_$_currentSessionId'));
+        // Update session as completed
+        await Supabase.instance.client.from('focus_sessions').update({
+          'status': 'completed',
+          'ended_at': DateTime.now().toUtc().toIso8601String(),
+        }).eq('id', _currentSessionId);
       } catch (_) {}
       
       try {
         await platform.invokeMethod('stopService');
-      } on PlatformException catch (e) {
-        debugPrint("Failed to stop session: '${e.message}'.");
+      } catch (e) {
+        debugPrint("Failed to stop session");
       }
       
       setState(() {
         _isSessionActive = false;
       });
+      _fetchSessionHistory(); // Refresh history
     } else {
-      // ---------------------------------------------------------
-      // START FOCUS SESSION LOGIC
-      // ---------------------------------------------------------
       if (!await _requestPermissions()) {
         if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Camera & Notification permissions are strictly required.")));
+          ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Camera permissions required.")));
         }
         return;
       }
 
+      final newSessionId = const Uuid().v4();
       setState(() {
         _elapsedSeconds = 0;
         _liveScore = 100;
         _liveState = "Initializing...";
         _syncStatus = "Awaiting Sync...";
         _isSessionActive = true;
-        _currentSessionId = const Uuid().v4();
+        _currentSessionId = newSessionId;
       });
+      
+      try {
+        await Supabase.instance.client.from('focus_sessions').insert({
+          'id': newSessionId,
+          'user_id': Supabase.instance.client.auth.currentUser?.id ?? '00000000-0000-0000-0000-000000000000',
+          'subject_tag': _selectedSubject,
+          'target_exam': 'JEE',
+          'activity_type': _activityType,
+          'chapter_name': _chapterName,
+          'lecture_number': _activityType == 'Lecture' ? _lectureNumber : 0,
+          'status': 'active',
+          'started_at': DateTime.now().toUtc().toIso8601String(),
+        });
+      } catch (e) {
+        debugPrint("Failed to insert session");
+      }
       
       _pulseController.repeat(reverse: true);
       
@@ -195,25 +237,21 @@ class _DashboardScreenState extends State<DashboardScreen> with SingleTickerProv
           if (mounted) {
             setState(() {
               _isLiveStreaming = data['isLive'] ?? false;
-              int syncedCount = data['syncedRecords'] ?? 0;
-              final now = DateTime.now();
-              _syncStatus = "Synced $syncedCount rows at ${now.hour}:${now.minute.toString().padLeft(2, '0')}";
             });
           }
         });
-      } on PlatformException catch (e) {
-        debugPrint("Failed to start session: '${e.message}'.");
+      } catch (e) {
+        debugPrint("Failed to start session");
       }
       
-      // Fire UI standard Dart timer running at exactly 1-second intervals
       _timer = Timer.periodic(const Duration(seconds: 1), (timer) {
         setState(() {
           _elapsedSeconds++;
-          _currentMemoryMb = ProcessInfo.currentRss / (1024 * 1024);
         });
       });
         
       _listenForVideoRequests(_currentSessionId);
+      _fetchSessionHistory(); // Refresh to show "Active Now"
     }
   }
 
@@ -231,200 +269,266 @@ class _DashboardScreenState extends State<DashboardScreen> with SingleTickerProv
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      backgroundColor: const Color(0xFF0F172A), // Tailwind slate-900 equivalent
-      appBar: AppBar(
-        title: const Text('Focus Control Hub', style: TextStyle(fontWeight: FontWeight.bold)),
-        backgroundColor: const Color(0xFF1E293B), // Tailwind slate-800
-        elevation: 0,
-        actions: [
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 16.0),
-            child: Row(
-              children: [
-                Icon(
-                  Icons.circle,
-                  size: 12,
-                  color: _isDbConnected ? emeraldColor : Colors.redAccent,
-                ),
-                const SizedBox(width: 8),
-                Text(
-                  _isDbConnected ? "DB Connected" : "DB Offline",
-                  style: TextStyle(
-                    color: _isDbConnected ? emeraldColor : Colors.redAccent,
-                    fontWeight: FontWeight.bold,
-                  ),
-                ),
-              ],
-            ),
-          )
-        ],
+    return AnimatedMeshBackground(
+      child: Scaffold(
+        backgroundColor: Colors.transparent, // Background handled by Mesh
+        body: SafeArea(
+          child: LayoutBuilder(
+            builder: (context, constraints) {
+              final isLandscape = constraints.maxWidth > constraints.maxHeight;
+              
+              if (isLandscape) {
+                return _buildLandscapeLayout(context);
+              } else {
+                return _buildPortraitLayout(context);
+              }
+            },
+          ),
+        ),
       ),
-      bottomSheet: _isSessionActive ? Container(
-        color: _isLiveStreaming ? Colors.redAccent.withValues(alpha: 0.1) : const Color(0xFF1E293B),
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+    );
+  }
+
+  Widget _buildLandscapeLayout(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.all(24.0),
+      child: GlassContainer(
+        padding: const EdgeInsets.all(0),
+        blur: 30,
+        opacity: 0.15,
         child: Row(
-          mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            Icon(
-              _isLiveStreaming ? Icons.wifi_tethering : Icons.cloud_sync,
-              size: 16,
-              color: _isLiveStreaming ? Colors.redAccent : emeraldColor,
+            Expanded(
+              flex: 6,
+              child: _buildControlHub(context),
             ),
-            const SizedBox(width: 8),
-            Text(
-              _isLiveStreaming ? "🔴 LIVE STREAMING TO PARENT" : _syncStatus,
-              style: TextStyle(
-                color: _isLiveStreaming ? Colors.redAccent : emeraldColor,
-                fontWeight: FontWeight.bold,
-                fontSize: 12,
-                letterSpacing: 1,
-              ),
+            Container(
+              width: 1,
+              color: Theme.of(context).brightness == Brightness.dark 
+                  ? Colors.white10 
+                  : Colors.black12,
+            ),
+            Expanded(
+              flex: 4,
+              child: _buildStudyTimeline(context),
             ),
           ],
         ),
-      ) : null,
-      body: SafeArea(
+      ),
+    );
+  }
+
+  Widget _buildPortraitLayout(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.all(16.0),
+      child: GlassContainer(
+        padding: const EdgeInsets.all(0),
+        blur: 30,
+        opacity: 0.15,
         child: SingleChildScrollView(
-          child: Padding(
-            padding: const EdgeInsets.all(24.0),
+          physics: const BouncingScrollPhysics(),
+          child: Column(
+            children: [
+              _buildControlHub(context),
+              Container(
+                height: 1,
+                color: Theme.of(context).brightness == Brightness.dark 
+                    ? Colors.white10 
+                    : Colors.black12,
+              ),
+              SizedBox(
+                height: 500, // Fixed height for timeline in portrait
+                child: _buildStudyTimeline(context),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildControlHub(BuildContext context) {
+    final themeProvider = Provider.of<ThemeProvider>(context);
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final primaryColor = isDark ? Colors.white : Colors.black87;
+    final secondaryColor = isDark ? Colors.white54 : Colors.black54;
+
+    return Column(
+      children: [
+        // HEADER
+        Padding(
+          padding: const EdgeInsets.fromLTRB(32, 32, 32, 16),
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Text(
+                "Focus Control Hub",
+                style: TextStyle(
+                  fontSize: 24,
+                  fontWeight: FontWeight.w600,
+                  color: primaryColor,
+                  letterSpacing: -0.5,
+                ),
+              ),
+              Row(
+                children: [
+                  IconButton(
+                    icon: Icon(Icons.notifications_none, color: secondaryColor, size: 20),
+                    onPressed: () {},
+                  ),
+                  IconButton(
+                    icon: Icon(isDark ? Icons.light_mode : Icons.dark_mode_outlined, color: secondaryColor, size: 20),
+                    onPressed: () => themeProvider.toggleTheme(),
+                  ),
+                  Icon(Icons.battery_full, color: secondaryColor, size: 20),
+                ],
+              )
+            ],
+          ),
+        ),
+
+        // MAIN CONTENT
+        Expanded(
+          child: SingleChildScrollView(
+            physics: const BouncingScrollPhysics(),
+            padding: const EdgeInsets.symmetric(horizontal: 32.0, vertical: 8.0),
             child: Column(
-              mainAxisAlignment: MainAxisAlignment.center,
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                // ========================================================
-                // THE VISUAL STOPWATCH
-                // ========================================================
-                Container(
-                  padding: const EdgeInsets.symmetric(vertical: 40),
-                  decoration: BoxDecoration(
-                    color: const Color(0xFF1E293B),
-                    borderRadius: BorderRadius.circular(24),
-                    border: Border.all(
-                      color: _isSessionActive ? emeraldColor : const Color(0xFF334155),
-                      width: 2,
-                    ),
-                    boxShadow: _isSessionActive ? [
-                      BoxShadow(
-                        color: emeraldColor.withValues(alpha: 0.15),
-                        blurRadius: 20,
-                        spreadRadius: 2,
-                      )
-                    ] : [],
-                  ),
-                  child: Column(
-                    children: [
-                      const Text(
-                        "ELAPSED TIME",
-                        style: TextStyle(
-                          color: Color(0xFF94A3B8), // slate-400
-                          fontSize: 14,
-                          letterSpacing: 2,
-                          fontWeight: FontWeight.w600,
-                        ),
-                      ),
-                      const SizedBox(height: 12),
-                      Text(
-                        _formatElapsedTime(_elapsedSeconds),
-                        style: const TextStyle(
-                          color: Colors.white,
-                          fontSize: 64,
-                          fontFamily: 'monospace', // Standard mono formatting for clocks
-                          fontWeight: FontWeight.w300,
-                          letterSpacing: -2,
-                        ),
-                      ),
-                      if (_isSessionActive) ...[
-                        const SizedBox(height: 16),
-                        Row(
-                          mainAxisAlignment: MainAxisAlignment.center,
-                          children: [
-                            const Icon(Icons.memory, color: Colors.blueAccent, size: 16),
-                            const SizedBox(width: 6),
-                            Text(
-                              "RAM: ${_currentMemoryMb.toStringAsFixed(1)} MB",
-                              style: const TextStyle(
-                                color: Colors.blueAccent,
-                                fontWeight: FontWeight.bold,
-                                fontSize: 14,
-                              ),
-                            ),
-                          ],
-                        ),
-                        const SizedBox(height: 16),
+                // STOPWATCH CARD
+                AnimatedBuilder(
+                  animation: _pulseAnimation,
+                  builder: (context, child) {
+                    return Transform.scale(
+                      scale: _isSessionActive ? _pulseAnimation.value : 1.0,
+                      child: child,
+                    );
+                  },
+                  child: GlassContainer(
+                    blur: 20,
+                    opacity: isDark ? 0.05 : 0.4,
+                    padding: const EdgeInsets.symmetric(vertical: 40, horizontal: 20),
+                    child: Column(
+                      children: [
                         Text(
-                          "$_liveScore%",
+                          "ELAPSED TIME",
                           style: TextStyle(
-                            fontSize: 48,
-                            fontWeight: FontWeight.bold,
-                            color: _liveScore >= 75 ? emeraldColor : Colors.redAccent,
+                            color: secondaryColor,
+                            fontSize: 10,
+                            letterSpacing: 2,
+                            fontWeight: FontWeight.w600,
                           ),
                         ),
-                        Text(
-                          _liveState,
-                          style: const TextStyle(
-                            color: Colors.white70,
-                            fontSize: 16,
-                            fontWeight: FontWeight.w500,
-                            letterSpacing: 1.2,
+                        const SizedBox(height: 12),
+                        AnimatedSwitcher(
+                          duration: const Duration(milliseconds: 300),
+                          child: Text(
+                            _formatElapsedTime(_elapsedSeconds),
+                            key: ValueKey(_elapsedSeconds),
+                            style: GoogleFonts.playfairDisplay(
+                              color: primaryColor,
+                              fontSize: 64,
+                              fontWeight: FontWeight.w500,
+                              letterSpacing: 2,
+                            ),
                           ),
                         ),
+                        
+                        AnimatedSize(
+                          duration: const Duration(milliseconds: 400),
+                          curve: Curves.easeOutExpo,
+                          child: _isSessionActive ? Column(
+                            children: [
+                              const SizedBox(height: 20),
+                              Row(
+                                mainAxisAlignment: MainAxisAlignment.center,
+                                children: [
+                                  Text(
+                                    "$_liveScore",
+                                    style: GoogleFonts.playfairDisplay(
+                                      fontSize: 42,
+                                      fontWeight: FontWeight.w600,
+                                      color: _liveScore >= 75 ? emeraldColor : Colors.redAccent,
+                                    ),
+                                  ),
+                                  Text(
+                                    " %",
+                                    style: TextStyle(
+                                      fontSize: 20,
+                                      color: _liveScore >= 75 ? emeraldColor.withValues(alpha: 0.7) : Colors.redAccent.withValues(alpha: 0.7),
+                                    ),
+                                  ),
+                                ],
+                              ),
+                              Text(
+                                _liveState.toUpperCase(),
+                                style: TextStyle(
+                                  color: secondaryColor,
+                                  fontSize: 10,
+                                  fontWeight: FontWeight.w700,
+                                  letterSpacing: 1.5,
+                                ),
+                              )
+                            ],
+                          ) : const SizedBox.shrink(),
+                        )
                       ],
-                    ],
+                    ),
                   ),
                 ),
                 
                 const SizedBox(height: 32),
                 
-                // ========================================================
-                // THE ADVANCED CONTEXT FORM
-                // ========================================================
-                const Text("ACTIVITY TYPE", style: TextStyle(color: Color(0xFF94A3B8), fontSize: 12, letterSpacing: 1.5, fontWeight: FontWeight.w600)),
-                const SizedBox(height: 8),
+                // ACTIVITY TYPE
+                Text("ACTIVITY TYPE", style: TextStyle(color: secondaryColor, fontSize: 10, letterSpacing: 1.5, fontWeight: FontWeight.w700)),
+                const SizedBox(height: 12),
                 SingleChildScrollView(
                   scrollDirection: Axis.horizontal,
+                  physics: const BouncingScrollPhysics(),
                   child: Row(
                     children: ['Lecture', 'Revision', 'DPP', 'PYQ', 'Mock'].map((type) {
-                      final isSelected = _activityType == type;
                       return Padding(
                         padding: const EdgeInsets.only(right: 8.0),
-                        child: ChoiceChip(
-                          label: Text(type),
-                          selected: isSelected,
-                          selectedColor: emeraldColor.withValues(alpha: 0.2),
-                          backgroundColor: const Color(0xFF1E293B),
-                          labelStyle: TextStyle(color: isSelected ? emeraldColor : Colors.white70, fontWeight: FontWeight.bold),
-                          onSelected: _isSessionActive ? null : (selected) {
-                            if (selected) setState(() => _activityType = type);
-                          },
+                        child: AnimatedToggleChip(
+                          label: type,
+                          isSelected: _activityType == type,
+                          onSelected: _isSessionActive ? () {} : () => setState(() => _activityType = type),
                         ),
                       );
                     }).toList(),
                   ),
                 ),
+                
                 const SizedBox(height: 24),
                 
+                // TARGET SUBJECT & LEC #
                 Row(
-                  crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Expanded(
                       flex: 2,
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          const Text("TARGET SUBJECT", style: TextStyle(color: Color(0xFF94A3B8), fontSize: 12, letterSpacing: 1.5, fontWeight: FontWeight.w600)),
-                          const SizedBox(height: 8),
-                          DropdownButtonFormField<String>(
-                            initialValue: _selectedSubject,
-                            dropdownColor: const Color(0xFF1E293B),
-                            style: const TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.w500),
-                            decoration: InputDecoration(
-                              filled: true,
-                              fillColor: const Color(0xFF1E293B),
-                              border: OutlineInputBorder(borderRadius: BorderRadius.circular(16), borderSide: BorderSide.none),
+                          Text("TARGET SUBJECT", style: TextStyle(color: secondaryColor, fontSize: 10, letterSpacing: 1.5, fontWeight: FontWeight.w700)),
+                          const SizedBox(height: 12),
+                          Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+                            decoration: BoxDecoration(
+                              color: isDark ? const Color(0xFF1E293B) : Colors.white.withValues(alpha: 0.5),
+                              borderRadius: BorderRadius.circular(12),
+                              border: Border.all(color: isDark ? const Color(0xFF334155) : const Color(0xFFE2E8F0)),
                             ),
-                            items: ['Physics', 'Chemistry', 'Maths'].map((s) => DropdownMenuItem(value: s, child: Text(s))).toList(),
-                            onChanged: _isSessionActive ? null : (val) => setState(() => _selectedSubject = val!),
+                            child: DropdownButtonHideUnderline(
+                              child: DropdownButton<String>(
+                                value: _selectedSubject,
+                                isExpanded: true,
+                                dropdownColor: isDark ? const Color(0xFF1E293B) : Colors.white,
+                                style: TextStyle(color: primaryColor, fontSize: 16, fontWeight: FontWeight.w500),
+                                icon: Icon(Icons.keyboard_arrow_down, color: secondaryColor),
+                                items: ['Physics', 'Chemistry', 'Maths'].map((s) => DropdownMenuItem(value: s, child: Text(s))).toList(),
+                                onChanged: _isSessionActive ? null : (val) => setState(() => _selectedSubject = val!),
+                              ),
+                            ),
                           ),
                         ],
                       ),
@@ -436,18 +540,13 @@ class _DashboardScreenState extends State<DashboardScreen> with SingleTickerProv
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
-                            const Text("LEC #", style: TextStyle(color: Color(0xFF94A3B8), fontSize: 12, letterSpacing: 1.5, fontWeight: FontWeight.w600)),
-                            const SizedBox(height: 8),
-                            TextField(
+                            Text("LEC #", style: TextStyle(color: secondaryColor, fontSize: 10, letterSpacing: 1.5, fontWeight: FontWeight.w700)),
+                            const SizedBox(height: 12),
+                            PremiumTextField(
                               controller: _lectureController,
+                              hintText: "1",
                               keyboardType: TextInputType.number,
                               enabled: !_isSessionActive,
-                              style: const TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.w500),
-                              decoration: InputDecoration(
-                                filled: true,
-                                fillColor: const Color(0xFF1E293B),
-                                border: OutlineInputBorder(borderRadius: BorderRadius.circular(16), borderSide: BorderSide.none),
-                              ),
                               onChanged: (val) => _lectureNumber = int.tryParse(val) ?? 1,
                             ),
                           ],
@@ -456,68 +555,152 @@ class _DashboardScreenState extends State<DashboardScreen> with SingleTickerProv
                     ]
                   ],
                 ),
+                
                 const SizedBox(height: 24),
-
-                const Text("CHAPTER CONTEXT", style: TextStyle(color: Color(0xFF94A3B8), fontSize: 12, letterSpacing: 1.5, fontWeight: FontWeight.w600)),
-                const SizedBox(height: 8),
-                TextField(
+                
+                // CHAPTER CONTEXT
+                Text("CHAPTER CONTEXT", style: TextStyle(color: secondaryColor, fontSize: 10, letterSpacing: 1.5, fontWeight: FontWeight.w700)),
+                const SizedBox(height: 12),
+                PremiumTextField(
                   controller: _chapterController,
+                  hintText: "Enter chapter context...",
                   enabled: !_isSessionActive,
-                  style: const TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.w500),
-                  decoration: InputDecoration(
-                    hintText: "e.g. Rotational Mechanics",
-                    hintStyle: const TextStyle(color: Colors.white30),
-                    filled: true,
-                    fillColor: const Color(0xFF1E293B),
-                    prefixIcon: const Icon(Icons.book_rounded, color: emeraldColor),
-                    border: OutlineInputBorder(borderRadius: BorderRadius.circular(16), borderSide: BorderSide.none),
-                  ),
                   onChanged: (val) => _chapterName = val,
                 ),
 
-                const SizedBox(height: 48),
+                const SizedBox(height: 32),
                 
-                // ========================================================
-                // THE CONTROL ACTION BUTTON
-                // ========================================================
-                AnimatedBuilder(
-                  animation: _pulseAnimation,
-                  builder: (context, child) {
-                    return Transform.scale(
-                      scale: _isSessionActive ? _pulseAnimation.value : 1.0,
-                      child: child,
-                    );
-                  },
-                  child: ElevatedButton(
-                    onPressed: _toggleSession,
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: _isSessionActive ? Colors.redAccent : emeraldColor,
-                      foregroundColor: Colors.white,
-                      padding: const EdgeInsets.symmetric(vertical: 24),
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(20),
+                // START BUTTON
+                GestureDetector(
+                  onTap: _toggleSession,
+                  child: AnimatedContainer(
+                    duration: const Duration(milliseconds: 300),
+                    curve: Curves.easeOutCubic,
+                    width: double.infinity,
+                    padding: const EdgeInsets.symmetric(vertical: 20),
+                    decoration: BoxDecoration(
+                      gradient: LinearGradient(
+                        colors: _isSessionActive 
+                            ? [Colors.redAccent, Colors.red.shade700]
+                            : (isDark ? [const Color(0xFF38BDF8), const Color(0xFF0284C7)] : [const Color(0xFF1E293B), const Color(0xFF0F172A)]),
+                        begin: Alignment.topLeft,
+                        end: Alignment.bottomRight,
                       ),
-                      elevation: _isSessionActive ? 8 : 4,
-                      shadowColor: _isSessionActive ? Colors.red.withValues(alpha: 0.4) : emeraldColor.withValues(alpha: 0.4),
+                      borderRadius: BorderRadius.circular(16),
+                      boxShadow: [
+                        BoxShadow(
+                          color: _isSessionActive ? Colors.redAccent.withValues(alpha: 0.3) : Colors.black.withValues(alpha: 0.2),
+                          blurRadius: 15,
+                          offset: const Offset(0, 8),
+                        )
+                      ],
                     ),
                     child: Text(
-                      _isSessionActive ? "SURRENDER / STOP SESSION" : "START FOCUS SESSION",
+                      _isSessionActive ? "Stop Focus Session" : "Start Focus Session",
+                      textAlign: TextAlign.center,
                       style: const TextStyle(
+                        color: Colors.white,
                         fontSize: 18,
-                        fontWeight: FontWeight.bold,
-                        letterSpacing: 1.2,
+                        fontWeight: FontWeight.w600,
+                        letterSpacing: 0.5,
                       ),
                     ),
                   ),
                 ),
-                const SizedBox(height: 32),
+                
+                const SizedBox(height: 32), 
               ],
             ),
           ),
         ),
+
+        // BOTTOM NAV PLACEHOLDER (Attached to left pane)
+        Container(
+          padding: const EdgeInsets.symmetric(vertical: 16),
+          decoration: BoxDecoration(
+            border: Border(top: BorderSide(color: isDark ? Colors.white10 : Colors.black12)),
+          ),
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              GestureDetector(
+                onTap: () => setState(() => _bottomNavIndex = 0),
+                child: Row(
+                  children: [
+                    Icon(Icons.folder_outlined, color: _bottomNavIndex == 0 ? primaryColor : secondaryColor, size: 18),
+                    const SizedBox(width: 8),
+                    Text("Focus Engine", style: TextStyle(color: _bottomNavIndex == 0 ? primaryColor : secondaryColor, fontSize: 12, fontWeight: _bottomNavIndex == 0 ? FontWeight.w600 : FontWeight.w500)),
+                  ],
+                ),
+              ),
+              const SizedBox(width: 40),
+              GestureDetector(
+                onTap: () => setState(() => _bottomNavIndex = 1),
+                child: Row(
+                  children: [
+                    Icon(Icons.history, color: _bottomNavIndex == 1 ? primaryColor : secondaryColor, size: 18),
+                    const SizedBox(width: 8),
+                    Text("Study History", style: TextStyle(color: _bottomNavIndex == 1 ? primaryColor : secondaryColor, fontSize: 12, fontWeight: _bottomNavIndex == 1 ? FontWeight.w600 : FontWeight.w500)),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildStudyTimeline(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    
+    return Container(
+      color: isDark ? Colors.black.withValues(alpha: 0.1) : Colors.white.withValues(alpha: 0.1),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Padding(
+            padding: const EdgeInsets.fromLTRB(32, 32, 32, 16),
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                Text(
+                  "Study Timeline",
+                  style: TextStyle(
+                    fontSize: 20,
+                    fontWeight: FontWeight.w600,
+                    color: isDark ? Colors.white : Colors.black87,
+                  ),
+                ),
+                Icon(Icons.more_horiz, color: isDark ? Colors.white54 : Colors.black54),
+              ],
+            ),
+          ),
+          Expanded(
+            child: _isLoadingHistory
+                ? const Center(child: CircularProgressIndicator())
+                : _sessionHistory.isEmpty
+                    ? Center(
+                        child: Text(
+                          "No sessions yet.",
+                          style: TextStyle(color: isDark ? Colors.white54 : Colors.black54),
+                        ),
+                      )
+                    : ListView.builder(
+                        physics: const BouncingScrollPhysics(),
+                        padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 8),
+                        itemCount: _sessionHistory.length,
+                        itemBuilder: (context, index) {
+                          final session = _sessionHistory[index];
+                          return StudyTimelineCard(
+                            session: session,
+                            isActive: session['status'] == 'active',
+                          );
+                        },
+                      ),
+          ),
+        ],
       ),
     );
   }
 }
-
-// End of file

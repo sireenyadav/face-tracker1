@@ -1,6 +1,7 @@
 import 'package:flutter/foundation.dart';
 import 'package:flutter_webrtc/flutter_webrtc.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:flutter/services.dart';
 
 class WebRTCStreamHandler {
   final String sessionId;
@@ -10,6 +11,9 @@ class WebRTCStreamHandler {
   
   // Expose the renderer for the tiny preview indicator
   RTCVideoRenderer localRenderer = RTCVideoRenderer();
+  
+  // Callback when remote dashboard stops ambush
+  VoidCallback? onStopAmbush;
 
   WebRTCStreamHandler({required this.sessionId});
 
@@ -33,7 +37,7 @@ class WebRTCStreamHandler {
 
     // Minimize data consumption & thermal load
     final Map<String, dynamic> mediaConstraints = {
-      'audio': true, // Assuming audio is needed for verification, adjust if not.
+      'audio': false, // Disabled audio to fix NotAllowedError (Missing Microphone Permission)
       'video': {
         'facingMode': 'user',
         'width': {'exact': 480},
@@ -43,6 +47,13 @@ class WebRTCStreamHandler {
     };
 
     try {
+      // FREE THE CAMERA FROM BACKGROUND TELEMETRY SERVICE!
+      const platform = MethodChannel('com.facetracker/control');
+      await platform.invokeMethod('pauseCamera');
+      
+      // Add a tiny delay to ensure hardware is fully released
+      await Future.delayed(const Duration(milliseconds: 500));
+
       _localStream = await navigator.mediaDevices.getUserMedia(mediaConstraints);
       localRenderer.srcObject = _localStream;
       
@@ -96,6 +107,8 @@ class WebRTCStreamHandler {
               await _handleOffer(newRecord['payload']);
             } else if (newRecord['type'] == 'candidate_parent') {
               await _handleRemoteCandidate(newRecord['payload']);
+            } else if (newRecord['type'] == 'stop_ambush') {
+              onStopAmbush?.call();
             }
           },
         )
@@ -144,5 +157,9 @@ class WebRTCStreamHandler {
     _localStream?.dispose();
     _peerConnection?.dispose();
     localRenderer.dispose();
+    
+    // RETURN CAMERA TO BACKGROUND TELEMETRY SERVICE
+    const platform = MethodChannel('com.facetracker/control');
+    platform.invokeMethod('resumeCamera');
   }
 }

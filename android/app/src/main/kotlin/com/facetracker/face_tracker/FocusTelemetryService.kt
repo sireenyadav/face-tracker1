@@ -16,6 +16,9 @@ import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
+import okhttp3.WebSocket
+import okhttp3.WebSocketListener
+import okhttp3.Response
 import org.json.JSONObject
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -40,9 +43,9 @@ class FocusTelemetryService : LifecycleService() {
     private var currentFocusScore = 100
     private var currentState = "Initializing..."
     private var serviceStartTime: Long = 0
-    private var isParentWatching = false
 
     private var cameraProvider: ProcessCameraProvider? = null
+    private var webSocket: WebSocket? = null
 
     // Coroutine Scopes
     private val serviceJob = SupervisorJob()
@@ -56,6 +59,8 @@ class FocusTelemetryService : LifecycleService() {
 
     companion object {
         const val ACTION_STOP_SERVICE = "STOP_TELEMETRY_SESSION"
+        const val ACTION_PAUSE_CAMERA = "PAUSE_CAMERA"
+        const val ACTION_RESUME_CAMERA = "RESUME_CAMERA"
         const val ACTION_TELEMETRY_UPDATE = "com.facetracker.TELEMETRY_UPDATE"
         const val ACTION_SYNC_UPDATE = "com.facetracker.SYNC_UPDATE"
         const val EXTRA_SCORE = "focusScore"
@@ -73,6 +78,14 @@ class FocusTelemetryService : LifecycleService() {
         if (intent?.action == ACTION_STOP_SERVICE) {
             handleSessionStop()
             return START_NOT_STICKY
+        }
+        if (intent?.action == ACTION_PAUSE_CAMERA) {
+            cameraProvider?.unbindAll()
+            return START_STICKY
+        }
+        if (intent?.action == ACTION_RESUME_CAMERA) {
+            startCameraAnalysis()
+            return START_STICKY
         }
 
         intent?.let {
@@ -94,7 +107,7 @@ class FocusTelemetryService : LifecycleService() {
         startCameraAnalysis()
         
         startSyncEngineLoop()
-        startParentWatchingPollingLoop()
+        startRealtimeWebSocket()
 
         return START_STICKY
     }
@@ -184,9 +197,7 @@ class FocusTelemetryService : LifecycleService() {
     private fun startSyncEngineLoop() {
         serviceScope.launch {
             while (isActive) {
-                // If parent is watching, sync every 1 second. Otherwise 5 minutes.
-                val delayMs = if (isParentWatching) 1_000L else 300_000L
-                delay(delayMs)
+                delay(60_000L) // 60-second batched data push loop
                 syncLocalDatabase()
             }
         }
@@ -219,7 +230,7 @@ class FocusTelemetryService : LifecycleService() {
                     // Notify Flutter UI
                     val syncIntent = Intent(ACTION_SYNC_UPDATE).apply {
                         putExtra("syncedRecords", recordIds.size)
-                        putExtra("isLive", isParentWatching)
+                        putExtra("isLive", true)
                         setPackage(packageName)
                     }
                     sendBroadcast(syncIntent)
@@ -268,37 +279,70 @@ class FocusTelemetryService : LifecycleService() {
         }
     }
 
-    private fun startParentWatchingPollingLoop() {
-        serviceScope.launch {
-            while (isActive) {
-                delay(10_000L) // Poll every 10 seconds
-                pollParentWatchingStatus()
+    private fun startRealtimeWebSocket() {
+        val wsUrl = SUPABASE_URL.replace("https://", "wss://") + "/realtime/v1/websocket?apikey=$SUPABASE_ANON_KEY&vsn=1.0.0"
+        
+        val request = Request.Builder()
+            .url(wsUrl)
+            .build()
+
+        webSocket = httpClient.newWebSocket(request, object : WebSocketListener() {
+            override fun onOpen(webSocket: WebSocket, response: Response) {
+                val joinPayload = JSONObject().apply {
+                    put("topic", "realtime:public:webrtc_signaling")
+                    put("event", "phx_join")
+                    put("payload", JSONObject())
+                    put("ref", "1")
+                }.toString()
+                webSocket.send(joinPayload)
+            }
+
+            override fun onMessage(webSocket: WebSocket, text: String) {
+                try {
+                    val json = JSONObject(text)
+                    val payload = json.optJSONObject("payload") ?: return
+                    val record = payload.optJSONObject("record")
+                    
+                    val isVideoRequest = (record?.optBoolean("video_request", false) == true) ||
+                                         (payload.optBoolean("video_request", false) == true)
+                                         
+                    if (isVideoRequest) {
+                        handleVideoRequest()
+                    }
+                } catch (e: Exception) {
+                    e.printStackTrace()
+                }
+            }
+
+            override fun onClosed(webSocket: WebSocket, code: Int, reason: String) {
+                reconnectWebSocket()
+            }
+
+            override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
+                reconnectWebSocket()
+            }
+        })
+    }
+
+    private fun reconnectWebSocket() {
+        if (!serviceJob.isCancelled) {
+            serviceScope.launch {
+                delay(5000L) // Wait 5 seconds before reconnecting
+                startRealtimeWebSocket()
             }
         }
     }
-    
-    private fun pollParentWatchingStatus() {
-        try {
-            val request = Request.Builder()
-                .url("$SUPABASE_URL/rest/v1/device_status?device_id=eq.global&select=is_watching")
-                .get()
-                .addHeader("apikey", SUPABASE_ANON_KEY)
-                .addHeader("Authorization", "Bearer $SUPABASE_ANON_KEY")
-                .build()
 
-            val response = httpClient.newCall(request).execute()
-            if (response.isSuccessful) {
-                val responseBody = response.body?.string()
-                if (!responseBody.isNullOrEmpty() && responseBody != "[]") {
-                    val jsonArray = org.json.JSONArray(responseBody)
-                    if (jsonArray.length() > 0) {
-                        isParentWatching = jsonArray.getJSONObject(0).optBoolean("is_watching", false)
-                    }
-                }
-            }
-            response.close()
-        } catch (e: Exception) {
-            e.printStackTrace()
+    private fun handleVideoRequest() {
+        stopCameraAnalysis()
+        
+        val intent = packageManager.getLaunchIntentForPackage(packageName)?.apply {
+            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP)
+            putExtra("START_VIDEO_COUNTDOWN", true)
+        }
+        
+        if (intent != null) {
+            startActivity(intent)
         }
     }
 
@@ -308,6 +352,7 @@ class FocusTelemetryService : LifecycleService() {
 
     private fun handleSessionStop() {
         stopCameraAnalysis()
+        webSocket?.close(1000, "Service stopped")
         
         val sdf = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss'Z'", Locale.US)
         sdf.timeZone = java.util.TimeZone.getTimeZone("UTC")
@@ -326,6 +371,7 @@ class FocusTelemetryService : LifecycleService() {
 
     override fun onDestroy() {
         super.onDestroy()
+        webSocket?.close(1000, "Service destroyed")
         serviceJob.cancel()
         dbHelper.close()
     }

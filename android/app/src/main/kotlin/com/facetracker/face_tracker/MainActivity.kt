@@ -162,6 +162,20 @@ class MainActivity: FlutterActivity() {
                     startService(intent)
                     result.success(true)
                 }
+                "pauseCamera" -> {
+                    val intent = Intent(this, FocusTelemetryService::class.java).apply {
+                        action = FocusTelemetryService.ACTION_PAUSE_CAMERA
+                    }
+                    startService(intent)
+                    result.success(true)
+                }
+                "resumeCamera" -> {
+                    val intent = Intent(this, FocusTelemetryService::class.java).apply {
+                        action = FocusTelemetryService.ACTION_RESUME_CAMERA
+                    }
+                    startService(intent)
+                    result.success(true)
+                }
                 else -> result.notImplemented()
             }
         }
