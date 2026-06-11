@@ -265,9 +265,10 @@ class _DashboardScreenState extends State<DashboardScreen>
 
   Future<bool> _requestPermissions() async {
     Map<Permission, PermissionStatus> statuses =
-        await [Permission.camera, Permission.notification].request();
+        await [Permission.camera, Permission.notification, Permission.systemAlertWindow].request();
     return statuses[Permission.camera]!.isGranted &&
-        statuses[Permission.notification]!.isGranted;
+        statuses[Permission.notification]!.isGranted &&
+        statuses[Permission.systemAlertWindow]!.isGranted;
   }
 
   // ── Session toggle ────────────────────────────────────────────────────────
@@ -383,9 +384,9 @@ class _DashboardScreenState extends State<DashboardScreen>
         'baselinePitch':
             calibPrefs.getDouble('calib_baseline_pitch') ?? 0.0,
         'sigmaYaw':
-            calibPrefs.getDouble('calib_sigma_yaw') ?? 15.0,
+            calibPrefs.getDouble('calib_sigma_yaw') ?? 35.0,
         'sigmaPitch':
-            calibPrefs.getDouble('calib_sigma_pitch') ?? 20.0,
+            calibPrefs.getDouble('calib_sigma_pitch') ?? 40.0,
       });
 
       try {

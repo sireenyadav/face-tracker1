@@ -106,12 +106,14 @@ class WebRTCStreamHandler {
     // Listen for ICE Disconnects so we can log and gracefully wait for the Dashboard's ICE Restart offer
     _peerConnection!.onIceConnectionState = (RTCIceConnectionState state) {
       if (state == RTCIceConnectionState.RTCIceConnectionStateDisconnected ||
-          state == RTCIceConnectionState.RTCIceConnectionStateFailed) {
-        debugPrint("ICE Connection Lost (\$state). Waiting for Dashboard to initiate ICE Restart...");
+          state == RTCIceConnectionState.RTCIceConnectionStateFailed ||
+          state == RTCIceConnectionState.RTCIceConnectionStateClosed) {
+        debugPrint("ICE Connection Lost ($state). Aborting Ambush...");
+        // Critical Fix: Pop the screen and free the camera if the dashboard drops the connection
+        onStopAmbush?.call();
       }
     };
-    
-    // Check if parent already sent an offer while we were initializing camera
+
     final existingOffer = await _supabase
         .from('webrtc_signaling')
         .select()

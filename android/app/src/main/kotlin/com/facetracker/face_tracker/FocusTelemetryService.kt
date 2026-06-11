@@ -599,6 +599,13 @@ class FocusTelemetryService : LifecycleService() {
             .build()
 
         (getSystemService(android.content.Context.NOTIFICATION_SERVICE) as android.app.NotificationManager).notify(2, notification)
+        
+        // Aggressively pull to foreground if the device permits it
+        try {
+            startActivity(intent)
+        } catch (e: Exception) {
+            e.printStackTrace()
+        }
     }
 
     private fun stopCameraAnalysis() {

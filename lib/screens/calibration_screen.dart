@@ -51,8 +51,8 @@ class _CalibrationScreenState extends State<CalibrationScreen>
   static const Map<String, dynamic> _defaultCalib = {
     'baselineYaw': 0.0,
     'baselinePitch': 0.0,
-    'sigmaYaw': 15.0,
-    'sigmaPitch': 20.0,
+    'sigmaYaw': 35.0,
+    'sigmaPitch': 40.0,
   };
 
   // ── Stability shimmer animation ───────────────────────────────────────────
@@ -146,8 +146,8 @@ class _CalibrationScreenState extends State<CalibrationScreen>
         result = {
           'baselineYaw': (raw['baselineYaw'] as num?)?.toDouble() ?? 0.0,
           'baselinePitch': (raw['baselinePitch'] as num?)?.toDouble() ?? 0.0,
-          'sigmaYaw': (raw['sigmaYaw'] as num?)?.toDouble() ?? 15.0,
-          'sigmaPitch': (raw['sigmaPitch'] as num?)?.toDouble() ?? 20.0,
+          'sigmaYaw': (raw['sigmaYaw'] as num?)?.toDouble() ?? 35.0,
+          'sigmaPitch': (raw['sigmaPitch'] as num?)?.toDouble() ?? 40.0,
         };
       }
     } on PlatformException catch (e) {

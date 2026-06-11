@@ -1437,21 +1437,21 @@ export default function ObserverDashboard() {
                     </div>
 
                     {/* Weekly Wellbeing Chart */}
-                    <div className="mt-4 flex-1 min-h-[160px]">
+                    <div className="mt-4 flex-1 h-[200px] min-h-[200px]">
                       <div className="flex justify-between text-xs mb-2">
                         <span className="text-slate-500 font-medium">
                           Weekly Wellbeing (Hours)
                         </span>
                       </div>
                       <ResponsiveContainer width="100%" height="100%">
-                        <BarChart data={weeklyStats} margin={{ top: 0, right: 0, left: -20, bottom: 0 }}>
-                          <XAxis dataKey="date" stroke="rgba(255,255,255,0.2)" fontSize={10} tickMargin={8} />
-                          <YAxis stroke="rgba(255,255,255,0.2)" fontSize={10} />
+                        <BarChart layout="vertical" data={weeklyStats} margin={{ top: 0, right: 0, left: 10, bottom: 0 }}>
+                          <XAxis type="number" stroke="rgba(255,255,255,0.2)" fontSize={10} tickMargin={8} />
+                          <YAxis type="category" dataKey="date" stroke="rgba(255,255,255,0.2)" fontSize={10} width={40} />
                           <Tooltip content={<CustomTooltip />} />
-                          <Bar dataKey="Physics" stackId="a" fill="#22d3ee" radius={[0, 0, 4, 4]} />
+                          <Bar dataKey="Physics" stackId="a" fill="#22d3ee" radius={[0, 0, 0, 0]} />
                           <Bar dataKey="Maths" stackId="a" fill="#818cf8" />
-                          <Bar dataKey="Chemistry" stackId="a" fill="#34d399" radius={[4, 4, 0, 0]} />
-                          <Bar dataKey="Other" stackId="a" fill="#f472b6" radius={[4, 4, 0, 0]} />
+                          <Bar dataKey="Chemistry" stackId="a" fill="#34d399" />
+                          <Bar dataKey="Other" stackId="a" fill="#f472b6" radius={[0, 4, 4, 0]} />
                         </BarChart>
                       </ResponsiveContainer>
                     </div>
