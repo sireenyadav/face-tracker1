@@ -6,7 +6,6 @@ import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContai
 import { ShieldAlert, Video, BrainCircuit, ActivitySquare, LayoutDashboard, History, PowerOff, CheckCircle2, AlertCircle, Clock, BatteryMedium, MoreHorizontal, Activity } from "lucide-react";
 import { FaceTrackerEdge } from "./components/FaceTrackerEdge";
 import { GlassCard } from "./components/GlassCard";
-import { motion, AnimatePresence } from "framer-motion";
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || "https://crmjzxhlggfpisknbjrr.supabase.co";
 const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImNybWp6eGhsZ2dmcGlza25ianJyIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc4MTE3MjMxOCwiZXhwIjoyMDk2NzQ4MzE4fQ.8CoDj9TVVuScYfTEvrF8kc99E5JpNOXGF-NJVj6SvQ8";
@@ -65,37 +64,42 @@ export default function ObserverDashboard() {
         setLiveStatus("Device Offline / Session Ended");
       }
 
-      // Fetch History Sessions & Calculate Stats
+      // Fetch History Sessions & Calculate Real Stats from Supabase
       const { data: historyData } = await supabase
         .from('focus_sessions')
-        .select('*')
+        .select('*, telemetry_logs ( focus_score )')
         .eq('status', 'completed')
         .order('ended_at', { ascending: false });
         
       if (historyData) {
         setHistorySessions(historyData.slice(0, 5)); // Only show top 5 in timeline
         
-        // Calculate Stats
         let totalMinutes = 0;
-        let totalScore = 0;
-        let validSessions = 0;
+        let totalScoreSum = 0;
+        let totalScoreCount = 0;
+        let drops = 0;
         
-        historyData.forEach(s => {
+        historyData.forEach((s: any) => {
           if (s.started_at && s.ended_at) {
-            const start = new Date(s.started_at);
-            const end = new Date(s.ended_at);
-            totalMinutes += Math.floor((end.getTime() - start.getTime()) / 60000);
-            validSessions++;
-            // Assuming average score would normally come from aggregations, mocking a bit based on session length
-            totalScore += 80 + Math.random() * 10; 
+            const start = new Date(s.started_at).getTime();
+            const end = new Date(s.ended_at).getTime();
+            totalMinutes += Math.floor((end - start) / 60000);
+          }
+          
+          if (s.telemetry_logs && s.telemetry_logs.length > 0) {
+             s.telemetry_logs.forEach((log: any) => {
+                totalScoreSum += log.focus_score;
+                totalScoreCount++;
+                if (log.focus_score < 75) drops++;
+             });
           }
         });
         
         const h = Math.floor(totalMinutes / 60);
         const m = totalMinutes % 60;
         setTotalFocusTime(`${h.toString().padStart(2, '0')}:${m.toString().padStart(2, '0')}`);
-        setAvgConsistency(validSessions > 0 ? Math.round(totalScore / validSessions) : 0);
-        setFocusDrops(Math.floor(Math.random() * 10)); // Mocks penalties for now
+        setAvgConsistency(totalScoreCount > 0 ? Math.round(totalScoreSum / totalScoreCount) : 0);
+        setFocusDrops(drops); 
       }
     };
     
@@ -139,6 +143,8 @@ export default function ObserverDashboard() {
           if (payload.new.status !== 'active') {
              setLiveStatus("Device Offline / Session Ended");
              setActiveSessionId(null);
+             // Re-fetch stats immediately when a session ends so dashboard is perfectly dynamic
+             fetchInitialData();
           }
       })
       .subscribe();
@@ -201,7 +207,8 @@ export default function ObserverDashboard() {
     await supabase.from('webrtc_signaling').insert({
       session_id: activeSessionId,
       type: 'offer_parent',
-      payload: { type: offer.type, sdp: offer.sdp }
+      // Added video_request: true so Android service instantly detects this as an ambush request
+      payload: { type: offer.type, sdp: offer.sdp, video_request: true }
     });
   };
 
@@ -259,7 +266,13 @@ export default function ObserverDashboard() {
             
             <div className="flex items-center space-x-4 mt-4 md:mt-0 text-sm font-semibold text-slate-600 bg-white/40 px-4 py-2 rounded-full shadow-sm border border-white/60">
               <span className="flex items-center"><Clock className="w-4 h-4 mr-2 text-slate-400"/> {new Date().toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric'})}</span>
-              <span className="flex items-center text-emerald-600"><BatteryMedium className="w-4 h-4 mr-1"/> Live Link</span>
+              
+              {/* Dynamic Live Link Indicator */}
+              <span className={`flex items-center transition-colors duration-500 ${activeSessionId ? 'text-emerald-600' : 'text-slate-400'}`}>
+                <BatteryMedium className="w-4 h-4 mr-1"/> 
+                {activeSessionId ? 'Live Link Active' : 'Offline'}
+              </span>
+              
               <MoreHorizontal className="w-5 h-5 ml-2 cursor-pointer hover:text-slate-900 transition-colors" />
             </div>
           </div>
@@ -278,7 +291,7 @@ export default function ObserverDashboard() {
                   <div className="flex justify-between items-center mb-4">
                     <h3 className="font-semibold text-slate-100 flex items-center">Focus Score Trajectory</h3>
                     <div className="px-3 py-1 rounded-full bg-cyan-500/20 text-cyan-300 text-xs font-bold border border-cyan-500/30 flex items-center shadow-[0_0_15px_rgba(6,182,212,0.3)]">
-                      <span className="w-2 h-2 rounded-full bg-cyan-400 mr-2 animate-pulse"></span>
+                      <span className={`w-2 h-2 rounded-full mr-2 ${activeSessionId ? 'bg-cyan-400 animate-pulse' : 'bg-slate-500'}`}></span>
                       {liveStatus}
                     </div>
                   </div>
@@ -386,7 +399,7 @@ export default function ObserverDashboard() {
 
               </div>
 
-              {/* Personal Overview (Bottom Left - Fixed Breakage) */}
+              {/* Personal Overview */}
               <div className="grid grid-cols-1 md:grid-cols-2 gap-6 h-[140px]">
                 <GlassCard variant="light" className="flex flex-col justify-center p-6 bg-white/40">
                   <div className="flex items-center justify-between mb-4">
@@ -400,17 +413,17 @@ export default function ObserverDashboard() {
                      <div className="flex-1 flex flex-col">
                         <div className="flex justify-between items-end mb-2">
                            <span className="text-xs font-semibold text-slate-600">Focus Score</span>
-                           <span className="font-serif text-2xl text-slate-800">80<span className="text-sm">%</span></span>
+                           <span className="font-serif text-2xl text-slate-800">{activeSessionId ? currentScore : avgConsistency}<span className="text-sm">%</span></span>
                         </div>
                         <div className="w-full h-2 bg-slate-200/50 rounded-full overflow-hidden shadow-inner">
-                           <div className="h-full bg-cyan-400 rounded-full w-[80%] shadow-sm"></div>
+                           <div className="h-full bg-cyan-400 rounded-full shadow-sm" style={{ width: `${activeSessionId ? currentScore : avgConsistency}%` }}></div>
                         </div>
                      </div>
                      
                      <div className="flex-1 flex flex-col">
                         <div className="flex justify-between items-end mb-2">
                            <span className="text-xs font-semibold text-slate-600">Time Elapsed</span>
-                           <span className="font-serif text-2xl text-slate-800">60<span className="text-sm font-sans text-slate-500 ml-1">m</span></span>
+                           <span className="font-serif text-2xl text-slate-800">{totalFocusTime}<span className="text-sm font-sans text-slate-500 ml-1">m</span></span>
                         </div>
                         <div className="w-full h-2 bg-slate-200/50 rounded-full overflow-hidden shadow-inner">
                            <div className="h-full bg-blue-400 rounded-full w-[45%]"></div>
@@ -424,15 +437,15 @@ export default function ObserverDashboard() {
                   <div className="space-y-2.5">
                     <div className="flex items-center justify-between text-sm">
                       <div className="flex items-center"><div className="w-2.5 h-2.5 rounded-full bg-emerald-400 mr-3 shadow-sm"></div><span className="text-slate-700 font-medium">Physics</span></div>
-                      <span className="text-slate-500 text-xs font-medium bg-white/50 px-2 py-1 rounded-md">Lec #11 • 1 min</span>
+                      <span className="text-slate-500 text-xs font-medium bg-white/50 px-2 py-1 rounded-md">Lec #11 • {totalFocusTime}</span>
                     </div>
                     <div className="flex items-center justify-between text-sm">
                       <div className="flex items-center"><div className="w-2.5 h-2.5 rounded-full bg-blue-400 mr-3 shadow-sm"></div><span className="text-slate-700 font-medium">Chemistry</span></div>
-                      <span className="text-slate-500 text-xs font-medium bg-white/50 px-2 py-1 rounded-md">Lec #11 • 2 min</span>
+                      <span className="text-slate-500 text-xs font-medium bg-white/50 px-2 py-1 rounded-md">--</span>
                     </div>
                     <div className="flex items-center justify-between text-sm">
                       <div className="flex items-center"><div className="w-2.5 h-2.5 rounded-full bg-cyan-400 mr-3 shadow-sm"></div><span className="text-slate-700 font-medium">Maths</span></div>
-                      <span className="text-slate-500 text-xs font-medium bg-white/50 px-2 py-1 rounded-md">Lec #11 • 2 min</span>
+                      <span className="text-slate-500 text-xs font-medium bg-white/50 px-2 py-1 rounded-md">--</span>
                     </div>
                   </div>
                 </GlassCard>
@@ -491,8 +504,13 @@ export default function ObserverDashboard() {
                   {historySessions.length === 0 ? (
                     <div className="text-center text-slate-400 mt-10 text-sm font-medium">No recent sessions found</div>
                   ) : (
-                    historySessions.map((session, idx) => {
-                      const fakeScore = 70 + (idx * 5) % 30; 
+                    historySessions.map((session: any) => {
+                      let realSessionAvg = 0;
+                      if (session.telemetry_logs && session.telemetry_logs.length > 0) {
+                        const sum = session.telemetry_logs.reduce((acc: number, log: any) => acc + log.focus_score, 0);
+                        realSessionAvg = Math.round(sum / session.telemetry_logs.length);
+                      }
+
                       return (
                         <div key={session.id} className="flex justify-between items-center p-4 rounded-2xl bg-white/60 border border-white/80 hover:bg-white/80 transition-colors cursor-pointer shadow-sm">
                           <div className="flex items-center">
@@ -505,7 +523,7 @@ export default function ObserverDashboard() {
                             </div>
                           </div>
                           <div className="text-right bg-slate-50 px-3 py-1 rounded-lg border border-slate-100">
-                            <span className={`font-serif text-xl ${fakeScore >= 80 ? 'text-emerald-500' : 'text-amber-500'}`}>{fakeScore}</span>
+                            <span className={`font-serif text-xl ${realSessionAvg >= 80 ? 'text-emerald-500' : 'text-amber-500'}`}>{realSessionAvg}</span>
                           </div>
                         </div>
                       )

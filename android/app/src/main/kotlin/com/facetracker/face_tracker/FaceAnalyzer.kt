@@ -41,8 +41,17 @@ class FaceAnalyzer(private val onFocusScoreUpdated: (Int, String, String) -> Uni
     private var lastEvaluationTimeMs = 0L
     private var currentState = "SCREEN_FOCUSED"
 
+    private var lastInferenceTimeMs = 0L
+
     @SuppressLint("UnsafeOptInUsageError")
     override fun analyze(imageProxy: ImageProxy) {
+        val currentTime = System.currentTimeMillis()
+        if (currentTime - lastInferenceTimeMs < 500) {
+            imageProxy.close()
+            return
+        }
+        lastInferenceTimeMs = currentTime
+
         val mediaImage = imageProxy.image
         if (mediaImage != null) {
             val image = InputImage.fromMediaImage(mediaImage, imageProxy.imageInfo.rotationDegrees)

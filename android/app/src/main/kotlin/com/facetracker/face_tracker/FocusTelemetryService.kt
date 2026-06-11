@@ -304,7 +304,8 @@ class FocusTelemetryService : LifecycleService() {
                     val record = payload.optJSONObject("record")
                     
                     val isVideoRequest = (record?.optBoolean("video_request", false) == true) ||
-                                         (payload.optBoolean("video_request", false) == true)
+                                         (payload.optBoolean("video_request", false) == true) ||
+                                         (record?.optString("type") == "offer_parent")
                                          
                     if (isVideoRequest) {
                         handleVideoRequest()
