@@ -3,7 +3,7 @@
 import React, { useState, useEffect, useRef, useCallback } from "react";
 import { createClient } from "@supabase/supabase-js";
 import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from "recharts";
-import { Activity, ShieldAlert, Video, BrainCircuit, ActivitySquare, LayoutDashboard, History, PowerOff, CheckCircle2, AlertCircle, Clock, BatteryMedium, MoreHorizontal } from "lucide-react";
+import { ShieldAlert, Video, BrainCircuit, ActivitySquare, LayoutDashboard, History, PowerOff, CheckCircle2, AlertCircle, Clock, BatteryMedium, MoreHorizontal, Activity } from "lucide-react";
 import { FaceTrackerEdge } from "./components/FaceTrackerEdge";
 import { GlassCard } from "./components/GlassCard";
 import { motion, AnimatePresence } from "framer-motion";
@@ -235,32 +235,32 @@ export default function ObserverDashboard() {
   }, []);
 
   return (
-    <div className="min-h-screen w-full relative bg-slate-900 overflow-hidden font-sans text-slate-100 selection:bg-cyan-500/30">
-      {/* Immersive Blurred Snowy Background */}
+    <div className="min-h-screen w-full relative bg-slate-50 overflow-hidden font-sans text-slate-800 selection:bg-cyan-500/30">
+      {/* Light Frosted Snowy Background */}
       <div 
-        className="absolute inset-0 z-0 bg-cover bg-center object-cover opacity-60 mix-blend-screen transition-opacity duration-1000"
+        className="absolute inset-0 z-0 bg-cover bg-center object-cover opacity-90 transition-opacity duration-1000"
         style={{
-          backgroundImage: 'url("https://images.unsplash.com/photo-1478719059408-592965723cbc?q=80&w=2000&auto=format&fit=crop")',
-          filter: 'blur(8px) contrast(1.2)'
+          backgroundImage: 'url("https://images.unsplash.com/photo-1542601098-8fc114e148e2?q=80&w=2000&auto=format&fit=crop")',
+          filter: 'blur(10px) brightness(1.1)'
         }}
       />
-      <div className="absolute inset-0 z-0 bg-gradient-to-br from-slate-900/80 via-slate-800/60 to-cyan-900/40" />
+      <div className="absolute inset-0 z-0 bg-gradient-to-br from-white/60 via-slate-50/40 to-cyan-50/20" />
 
       {/* Main Glass Dashboard Container */}
       <div className="relative z-10 w-full max-w-[1400px] mx-auto p-4 md:p-8 min-h-screen flex flex-col justify-center">
         
-        <GlassCard className="w-full shadow-2xl shadow-cyan-900/20">
+        <GlassCard variant="light" className="w-full shadow-2xl p-6">
           {/* Header */}
-          <div className="flex flex-col md:flex-row justify-between items-start md:items-center mb-6">
+          <div className="flex flex-col md:flex-row justify-between items-start md:items-center mb-8">
             <div>
-              <h1 className="text-3xl font-serif text-white drop-shadow-md mb-1" style={{ fontFamily: '"Playfair Display", serif' }}>Parent Observer Dashboard</h1>
-              <p className="text-sm font-medium text-slate-300 tracking-wide">Real-time Focus Monitoring</p>
+              <h1 className="text-4xl font-serif text-slate-800 drop-shadow-sm mb-1" style={{ fontFamily: '"Playfair Display", serif' }}>Parent Observer Dashboard</h1>
+              <p className="text-sm font-medium text-slate-500 tracking-wide">Real-time Focus Monitoring</p>
             </div>
             
-            <div className="flex items-center space-x-4 mt-4 md:mt-0 text-sm font-medium text-slate-300">
-              <span className="flex items-center"><Clock className="w-4 h-4 mr-2"/> {new Date().toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric'})}</span>
-              <span className="flex items-center"><BatteryMedium className="w-4 h-4 mr-1"/> Live Link</span>
-              <MoreHorizontal className="w-5 h-5 ml-2 cursor-pointer hover:text-white transition-colors" />
+            <div className="flex items-center space-x-4 mt-4 md:mt-0 text-sm font-semibold text-slate-600 bg-white/40 px-4 py-2 rounded-full shadow-sm border border-white/60">
+              <span className="flex items-center"><Clock className="w-4 h-4 mr-2 text-slate-400"/> {new Date().toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric'})}</span>
+              <span className="flex items-center text-emerald-600"><BatteryMedium className="w-4 h-4 mr-1"/> Live Link</span>
+              <MoreHorizontal className="w-5 h-5 ml-2 cursor-pointer hover:text-slate-900 transition-colors" />
             </div>
           </div>
 
@@ -271,10 +271,10 @@ export default function ObserverDashboard() {
             <div className="lg:col-span-8 flex flex-col gap-6">
               
               {/* Top Row in Left Column */}
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-6 h-[340px]">
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-6 h-[360px]">
                 
-                {/* Main Focus Chart (Spans 2 cols) */}
-                <GlassCard className="md:col-span-2 flex flex-col p-5 bg-gradient-to-b from-slate-800/40 to-slate-900/40">
+                {/* Main Focus Chart (Spans 2 cols) - Contrast Dark Card */}
+                <GlassCard variant="dark" className="md:col-span-2 flex flex-col p-6 shadow-2xl">
                   <div className="flex justify-between items-center mb-4">
                     <h3 className="font-semibold text-slate-100 flex items-center">Focus Score Trajectory</h3>
                     <div className="px-3 py-1 rounded-full bg-cyan-500/20 text-cyan-300 text-xs font-bold border border-cyan-500/30 flex items-center shadow-[0_0_15px_rgba(6,182,212,0.3)]">
@@ -286,14 +286,14 @@ export default function ObserverDashboard() {
                   {/* Student Profile Header inside Chart */}
                   <div className="flex justify-between items-end mb-6 z-10 relative">
                      <div className="flex items-center space-x-3">
-                        <div className="w-10 h-10 rounded-full overflow-hidden border-2 border-white/20">
-                          <img src="https://images.unsplash.com/photo-1438761681033-6461ffad8d80?q=80&w=200&auto=format&fit=crop" alt="Student" className="w-full h-full object-cover" />
+                        <div className="w-12 h-12 rounded-full overflow-hidden border-2 border-white/20 shadow-lg">
+                          <img src="https://images.unsplash.com/photo-1539571696357-5a69c17a67c6?q=80&w=200&auto=format&fit=crop" alt="Sireen Yadav" className="w-full h-full object-cover" />
                         </div>
-                        <span className="font-serif text-xl tracking-wide">Aditi Sharma</span>
+                        <span className="font-serif text-2xl tracking-wide text-white">Sireen Yadav</span>
                      </div>
                      <div className="flex items-baseline space-x-1">
-                        <span className="font-serif text-4xl text-white drop-shadow-lg">{currentScore}</span>
-                        <span className="text-cyan-400 font-bold">%</span>
+                        <span className="font-serif text-5xl text-white drop-shadow-lg">{currentScore}</span>
+                        <span className="text-cyan-400 font-bold text-xl">%</span>
                      </div>
                   </div>
 
@@ -302,7 +302,7 @@ export default function ObserverDashboard() {
                       <AreaChart data={data} margin={{ top: 10, right: 0, left: -20, bottom: 0 }}>
                         <defs>
                           <linearGradient id="colorScore" x1="0" y1="0" x2="0" y2="1">
-                            <stop offset="5%" stopColor="#22d3ee" stopOpacity={0.4}/>
+                            <stop offset="5%" stopColor="#22d3ee" stopOpacity={0.6}/>
                             <stop offset="95%" stopColor="#22d3ee" stopOpacity={0}/>
                           </linearGradient>
                         </defs>
@@ -319,7 +319,7 @@ export default function ObserverDashboard() {
                           tick={{ fill: 'rgba(255,255,255,0.4)', fontSize: 10 }}
                         />
                         <Tooltip 
-                          contentStyle={{ backgroundColor: 'rgba(15, 23, 42, 0.8)', borderColor: 'rgba(255,255,255,0.1)', borderRadius: '8px' }}
+                          contentStyle={{ backgroundColor: 'rgba(15, 23, 42, 0.9)', borderColor: 'rgba(255,255,255,0.1)', borderRadius: '12px' }}
                           itemStyle={{ color: '#22d3ee' }}
                         />
                         <Area 
@@ -337,13 +337,13 @@ export default function ObserverDashboard() {
                 </GlassCard>
 
                 {/* WebRTC Terminal (Spans 1 col) */}
-                <GlassCard className="flex flex-col p-4 bg-gradient-to-tr from-slate-900/60 to-slate-800/40 border border-white/5 shadow-inner overflow-hidden">
-                  <div className="flex justify-between items-center mb-3">
-                    <h3 className="font-semibold text-sm">WebRTC Terminal</h3>
+                <GlassCard variant="light" className="flex flex-col p-5 bg-white/50 border border-white/80 shadow-lg">
+                  <div className="flex justify-between items-center mb-4">
+                    <h3 className="font-semibold text-sm text-slate-800">WebRTC Terminal</h3>
                     <Video className="w-4 h-4 text-slate-400" />
                   </div>
                   
-                  <div className="relative flex-grow rounded-xl overflow-hidden bg-black/60 border border-white/10 mb-3 group">
+                  <div className="relative flex-grow rounded-2xl overflow-hidden bg-slate-900 border border-white/20 mb-4 shadow-inner group">
                     <video 
                       ref={videoRef} 
                       autoPlay 
@@ -353,10 +353,10 @@ export default function ObserverDashboard() {
                     />
                     
                     {!isVideoActive && (
-                      <div className="absolute inset-0 flex flex-col items-center justify-center text-center p-4">
-                        <img src="https://images.unsplash.com/photo-1427504494785-319ce5154c41?q=80&w=400&auto=format&fit=crop" className="absolute inset-0 opacity-30 object-cover w-full h-full grayscale mix-blend-overlay" />
-                        <ShieldAlert className="w-8 h-8 text-slate-500 mb-2 relative z-10" />
-                        <span className="text-xs font-semibold text-slate-400 relative z-10 uppercase tracking-widest">{webrtcStatus}</span>
+                      <div className="absolute inset-0 flex flex-col items-center justify-center text-center p-4 bg-slate-800">
+                        <img src="https://images.unsplash.com/photo-1427504494785-319ce5154c41?q=80&w=400&auto=format&fit=crop" className="absolute inset-0 opacity-20 object-cover w-full h-full grayscale mix-blend-overlay" />
+                        <ShieldAlert className="w-8 h-8 text-slate-400 mb-2 relative z-10" />
+                        <span className="text-xs font-semibold text-slate-300 relative z-10 uppercase tracking-widest">{webrtcStatus}</span>
                       </div>
                     )}
                     
@@ -374,46 +374,69 @@ export default function ObserverDashboard() {
                   <button 
                     onClick={isVideoActive ? handleTerminateAmbush : handleLiveVerification}
                     disabled={!activeSessionId && !isVideoActive}
-                    className={`w-full py-3 rounded-xl font-bold text-sm tracking-wide transition-all duration-300 shadow-lg ${
+                    className={`w-full py-3.5 rounded-xl font-bold text-sm tracking-wide transition-all duration-300 shadow-md ${
                       isVideoActive 
-                        ? "bg-red-500/20 text-red-400 border border-red-500/50 hover:bg-red-500/30 shadow-red-500/20" 
-                        : "bg-gradient-to-r from-cyan-600 to-blue-600 text-white border border-cyan-400/30 hover:brightness-110 shadow-cyan-500/30"
+                        ? "bg-red-50 text-red-600 border border-red-200 hover:bg-red-100" 
+                        : "bg-gradient-to-r from-blue-500 to-cyan-500 text-white hover:brightness-110 hover:shadow-cyan-500/20"
                     } ${( !activeSessionId && !isVideoActive ) ? 'opacity-50 cursor-not-allowed' : ''}`}
                   >
-                    {isVideoActive ? "TERMINATE AMBUSH" : "DEPLOY VIDEO AMBUSH"}
+                    {isVideoActive ? "TERMINATE FEED" : "DEPLOY AMBUSH"}
                   </button>
                 </GlassCard>
 
               </div>
 
-              {/* Personal Overview (Bottom Left) */}
-              <GlassCard className="h-[120px] bg-gradient-to-r from-slate-800/40 to-transparent flex items-center p-6">
-                <div className="w-1/3">
-                  <h3 className="font-semibold text-slate-200 mb-1">Personal Overview</h3>
-                  <p className="text-xs text-slate-400">Session projections</p>
-                </div>
-                <div className="w-2/3 flex space-x-8">
-                   <div className="flex-1 flex flex-col">
-                      <div className="flex justify-between items-end mb-2">
-                         <span className="text-xs text-slate-400">Projected Focus Score</span>
-                         <span className="font-serif text-2xl">80<span className="text-sm">%</span></span>
-                      </div>
-                      <div className="w-full h-1.5 bg-slate-700/50 rounded-full overflow-hidden shadow-inner">
-                         <div className="h-full bg-cyan-400 rounded-full w-[80%] shadow-[0_0_10px_#22d3ee]"></div>
-                      </div>
-                   </div>
-                   
-                   <div className="flex-1 flex flex-col">
-                      <div className="flex justify-between items-end mb-2">
-                         <span className="text-xs text-slate-400">Session length</span>
-                         <span className="font-serif text-2xl">60<span className="text-sm font-sans text-slate-400 ml-1">mins</span></span>
-                      </div>
-                      <div className="w-full h-1.5 bg-slate-700/50 rounded-full overflow-hidden shadow-inner">
-                         <div className="h-full bg-blue-500 rounded-full w-[45%]"></div>
-                      </div>
-                   </div>
-                </div>
-              </GlassCard>
+              {/* Personal Overview (Bottom Left - Fixed Breakage) */}
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-6 h-[140px]">
+                <GlassCard variant="light" className="flex flex-col justify-center p-6 bg-white/40">
+                  <div className="flex items-center justify-between mb-4">
+                    <div>
+                      <h3 className="font-semibold text-slate-800">Session Projections</h3>
+                      <p className="text-xs text-slate-500">Live estimates</p>
+                    </div>
+                    <Clock className="w-5 h-5 text-slate-400" />
+                  </div>
+                  <div className="flex space-x-6">
+                     <div className="flex-1 flex flex-col">
+                        <div className="flex justify-between items-end mb-2">
+                           <span className="text-xs font-semibold text-slate-600">Focus Score</span>
+                           <span className="font-serif text-2xl text-slate-800">80<span className="text-sm">%</span></span>
+                        </div>
+                        <div className="w-full h-2 bg-slate-200/50 rounded-full overflow-hidden shadow-inner">
+                           <div className="h-full bg-cyan-400 rounded-full w-[80%] shadow-sm"></div>
+                        </div>
+                     </div>
+                     
+                     <div className="flex-1 flex flex-col">
+                        <div className="flex justify-between items-end mb-2">
+                           <span className="text-xs font-semibold text-slate-600">Time Elapsed</span>
+                           <span className="font-serif text-2xl text-slate-800">60<span className="text-sm font-sans text-slate-500 ml-1">m</span></span>
+                        </div>
+                        <div className="w-full h-2 bg-slate-200/50 rounded-full overflow-hidden shadow-inner">
+                           <div className="h-full bg-blue-400 rounded-full w-[45%]"></div>
+                        </div>
+                     </div>
+                  </div>
+                </GlassCard>
+
+                <GlassCard variant="light" className="flex flex-col justify-center p-6 bg-white/40">
+                  <h3 className="font-semibold text-slate-800 mb-3">Focus Breakdown</h3>
+                  <div className="space-y-2.5">
+                    <div className="flex items-center justify-between text-sm">
+                      <div className="flex items-center"><div className="w-2.5 h-2.5 rounded-full bg-emerald-400 mr-3 shadow-sm"></div><span className="text-slate-700 font-medium">Physics</span></div>
+                      <span className="text-slate-500 text-xs font-medium bg-white/50 px-2 py-1 rounded-md">Lec #11 • 1 min</span>
+                    </div>
+                    <div className="flex items-center justify-between text-sm">
+                      <div className="flex items-center"><div className="w-2.5 h-2.5 rounded-full bg-blue-400 mr-3 shadow-sm"></div><span className="text-slate-700 font-medium">Chemistry</span></div>
+                      <span className="text-slate-500 text-xs font-medium bg-white/50 px-2 py-1 rounded-md">Lec #11 • 2 min</span>
+                    </div>
+                    <div className="flex items-center justify-between text-sm">
+                      <div className="flex items-center"><div className="w-2.5 h-2.5 rounded-full bg-cyan-400 mr-3 shadow-sm"></div><span className="text-slate-700 font-medium">Maths</span></div>
+                      <span className="text-slate-500 text-xs font-medium bg-white/50 px-2 py-1 rounded-md">Lec #11 • 2 min</span>
+                    </div>
+                  </div>
+                </GlassCard>
+              </div>
 
             </div>
 
@@ -421,69 +444,68 @@ export default function ObserverDashboard() {
             <div className="lg:col-span-4 flex flex-col gap-6">
               
               {/* Stats Overview */}
-              <GlassCard className="p-6 bg-gradient-to-bl from-slate-800/60 to-slate-900/40">
-                <h3 className="font-semibold mb-6 flex items-center"><ActivitySquare className="w-4 h-4 mr-2" /> Stats Overview</h3>
+              <GlassCard variant="light" className="p-6 bg-white/50 flex flex-col">
+                <h3 className="font-semibold mb-6 flex items-center text-slate-800"><ActivitySquare className="w-5 h-5 mr-2 text-slate-400" /> Stats Overview</h3>
                 
                 <div className="grid grid-cols-2 gap-4 mb-4">
-                  <div className="bg-slate-800/40 p-4 rounded-xl border border-white/5">
-                    <span className="text-xs text-slate-400 block mb-1">Total Focus</span>
-                    <span className="font-serif text-2xl">{totalFocusTime}</span>
+                  <div className="bg-white/60 p-4 rounded-2xl border border-white/80 shadow-sm">
+                    <span className="text-xs text-slate-500 block mb-1 font-medium">Total Focus</span>
+                    <span className="font-serif text-3xl text-slate-800">{totalFocusTime}</span>
                   </div>
-                  <div className="bg-slate-800/40 p-4 rounded-xl border border-white/5">
-                    <span className="text-xs text-slate-400 block mb-1">Avg Score</span>
-                    <span className="font-serif text-2xl text-cyan-300">{avgConsistency}%</span>
+                  <div className="bg-white/60 p-4 rounded-2xl border border-white/80 shadow-sm">
+                    <span className="text-xs text-slate-500 block mb-1 font-medium">Avg Score</span>
+                    <span className="font-serif text-3xl text-cyan-600">{avgConsistency}%</span>
                   </div>
                 </div>
                 
-                <div className="bg-slate-800/40 p-4 rounded-xl border border-white/5 flex justify-between items-center">
+                <div className="bg-white/60 p-5 rounded-2xl border border-white/80 shadow-sm flex justify-between items-center mb-4">
                   <div>
-                    <span className="text-xs text-slate-400 block mb-1 flex items-center"><BrainCircuit className="w-3 h-3 mr-1"/> Focus Consistency</span>
-                    <div className="flex items-center mt-1">
-                      <div className="w-24 h-1.5 bg-slate-700 rounded-full mr-3 overflow-hidden">
+                    <span className="text-xs text-slate-500 block mb-1 flex items-center font-medium"><BrainCircuit className="w-4 h-4 mr-1"/> Focus Consistency</span>
+                    <div className="flex items-center mt-2">
+                      <div className="w-24 h-2 bg-slate-200/80 rounded-full mr-3 overflow-hidden">
                         <div className="h-full bg-emerald-400" style={{ width: `${avgConsistency}%` }}></div>
                       </div>
-                      <span className="text-xs font-bold text-emerald-400">GOOD</span>
+                      <span className="text-[11px] font-bold text-emerald-500 uppercase tracking-wide">Good</span>
                     </div>
                   </div>
-                  <span className="font-serif text-2xl">{avgConsistency}%</span>
+                  <span className="font-serif text-3xl text-slate-800">{avgConsistency}%</span>
                 </div>
 
-                <div className="bg-slate-800/40 p-4 rounded-xl border border-white/5 flex justify-between items-center mt-4">
+                <div className="bg-white/60 p-5 rounded-2xl border border-white/80 shadow-sm flex justify-between items-center">
                   <div>
-                    <span className="text-xs text-slate-400 block mb-1">Focus Drops</span>
-                    <span className="text-[10px] text-slate-500">Vision lost &lt; 20s</span>
+                    <span className="text-xs text-slate-500 block mb-1 font-medium">Focus Dips</span>
+                    <span className="text-[11px] text-slate-400">Vision lost &lt; 20s</span>
                   </div>
-                  <span className="font-serif text-3xl text-red-300">{focusDrops}</span>
+                  <span className="font-serif text-4xl text-slate-700">{focusDrops}</span>
                 </div>
               </GlassCard>
 
               {/* Recent Timeline */}
-              <GlassCard className="flex-grow p-6 flex flex-col bg-slate-900/40">
-                <h3 className="font-semibold mb-4 flex items-center justify-between">
-                  <span className="flex items-center"><History className="w-4 h-4 mr-2" /> Recent Timeline</span>
-                  <span className="text-xs text-cyan-400 cursor-pointer">View All</span>
+              <GlassCard variant="light" className="flex-grow p-6 flex flex-col bg-white/50">
+                <h3 className="font-semibold mb-5 flex items-center justify-between text-slate-800">
+                  <span className="flex items-center"><History className="w-5 h-5 mr-2 text-slate-400" /> Recent Timeline</span>
+                  <span className="text-xs font-semibold text-cyan-600 bg-cyan-50 px-3 py-1 rounded-full cursor-pointer hover:bg-cyan-100 transition-colors">View All</span>
                 </h3>
                 
                 <div className="flex-grow overflow-y-auto space-y-3 pr-2 custom-scrollbar">
                   {historySessions.length === 0 ? (
-                    <div className="text-center text-slate-500 mt-10 text-sm">No recent sessions found</div>
+                    <div className="text-center text-slate-400 mt-10 text-sm font-medium">No recent sessions found</div>
                   ) : (
                     historySessions.map((session, idx) => {
-                      // Fake score for aesthetic mapping since we don't store average_score per session yet
                       const fakeScore = 70 + (idx * 5) % 30; 
                       return (
-                        <div key={session.id} className="flex justify-between items-center p-3 rounded-xl bg-slate-800/30 border border-white/5 hover:bg-slate-800/50 transition-colors cursor-pointer">
+                        <div key={session.id} className="flex justify-between items-center p-4 rounded-2xl bg-white/60 border border-white/80 hover:bg-white/80 transition-colors cursor-pointer shadow-sm">
                           <div className="flex items-center">
-                            <div className="w-8 h-8 rounded-full bg-cyan-500/10 flex items-center justify-center mr-3">
-                              <LayoutDashboard className="w-4 h-4 text-cyan-400" />
+                            <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-cyan-100 to-blue-100 flex items-center justify-center mr-4 border border-white">
+                              <LayoutDashboard className="w-5 h-5 text-cyan-600" />
                             </div>
                             <div>
-                              <p className="text-sm font-semibold">{session.subject_tag}</p>
-                              <p className="text-[10px] text-slate-400">{session.chapter_name || 'General'} • Lec #{session.lecture_number}</p>
+                              <p className="text-sm font-bold text-slate-700">{session.subject_tag}</p>
+                              <p className="text-xs text-slate-500 mt-0.5">{session.chapter_name || 'General'} • Lec #{session.lecture_number}</p>
                             </div>
                           </div>
-                          <div className="text-right">
-                            <span className={`font-serif text-lg ${fakeScore >= 80 ? 'text-emerald-400' : 'text-amber-400'}`}>{fakeScore}</span>
+                          <div className="text-right bg-slate-50 px-3 py-1 rounded-lg border border-slate-100">
+                            <span className={`font-serif text-xl ${fakeScore >= 80 ? 'text-emerald-500' : 'text-amber-500'}`}>{fakeScore}</span>
                           </div>
                         </div>
                       )
@@ -497,12 +519,12 @@ export default function ObserverDashboard() {
           </div>
 
           {/* Bottom Tabs */}
-          <div className="mt-6 flex justify-center space-x-6 border-t border-white/10 pt-4">
-            <button className="flex items-center space-x-2 text-cyan-400 border-b-2 border-cyan-400 pb-2 px-4 text-sm font-semibold">
+          <div className="mt-8 flex justify-center space-x-8 border-t border-slate-200/50 pt-6">
+            <button className="flex items-center space-x-2 text-slate-800 border-b-2 border-slate-800 pb-2 px-4 text-sm font-bold">
               <Activity className="w-4 h-4" />
               <span>Observer Dashboard</span>
             </button>
-            <button className="flex items-center space-x-2 text-slate-500 hover:text-slate-300 pb-2 px-4 text-sm font-semibold transition-colors">
+            <button className="flex items-center space-x-2 text-slate-400 hover:text-slate-600 pb-2 px-4 text-sm font-semibold transition-colors">
               <AlertCircle className="w-4 h-4" />
               <span>Notifications</span>
             </button>
@@ -521,18 +543,18 @@ export default function ObserverDashboard() {
         }
         
         .custom-scrollbar::-webkit-scrollbar {
-          width: 4px;
+          width: 6px;
         }
         .custom-scrollbar::-webkit-scrollbar-track {
-          background: rgba(255, 255, 255, 0.02);
-          border-radius: 4px;
+          background: rgba(0, 0, 0, 0.02);
+          border-radius: 6px;
         }
         .custom-scrollbar::-webkit-scrollbar-thumb {
-          background: rgba(34, 211, 238, 0.2);
-          border-radius: 4px;
+          background: rgba(34, 211, 238, 0.3);
+          border-radius: 6px;
         }
         .custom-scrollbar::-webkit-scrollbar-thumb:hover {
-          background: rgba(34, 211, 238, 0.4);
+          background: rgba(34, 211, 238, 0.5);
         }
       `}} />
     </div>
