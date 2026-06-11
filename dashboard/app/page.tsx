@@ -153,36 +153,55 @@ export default function ObserverDashboard() {
     };
 
     // Listen for Answer and Candidates from Tablet
+    console.log("Subscribing to webrtc_parent_listener for session:", activeSessionId);
     const signalingChannel = supabase.channel('webrtc_parent_listener')
       .on(
         'postgres_changes',
         { event: 'INSERT', schema: 'public', table: 'webrtc_signaling', filter: `session_id=eq.${activeSessionId}` },
         async (payload) => {
           const record = payload.new;
+          console.log("REALTIME RECEIVED:", record.type, record.payload);
           if (record.type === 'answer_tablet') {
+             console.log("Setting Remote Description (Answer)...");
              setWebrtcStatus("Received Tablet Answer. Establishing ICE...");
              await pc.setRemoteDescription(new RTCSessionDescription(record.payload));
+             console.log("Remote Description Set!");
           } else if (record.type === 'candidate_tablet') {
+             console.log("Adding ICE Candidate...");
              await pc.addIceCandidate(new RTCIceCandidate(record.payload));
           }
         }
       )
-      .subscribe();
+      .subscribe((status) => {
+         console.log("Realtime subscription status:", status);
+      });
 
     // Add transceivers to trigger offer generation
+    console.log("Adding transceivers...");
     pc.addTransceiver('video', { direction: 'recvonly' });
     pc.addTransceiver('audio', { direction: 'recvonly' });
 
     setWebrtcStatus("Generating SDP Offer...");
+    console.log("Creating SDP Offer...");
     const offer = await pc.createOffer();
+    
+    console.log("Setting Local Description...");
     await pc.setLocalDescription(offer);
 
     setWebrtcStatus("Transmitting Offer to Tablet via Supabase Realtime...");
-    await supabase.from('webrtc_signaling').insert({
+    console.log("Inserting offer_parent into Supabase...");
+    const { error } = await supabase.from('webrtc_signaling').insert({
       session_id: activeSessionId,
       type: 'offer_parent',
       payload: { type: offer.type, sdp: offer.sdp }
     });
+    
+    if (error) {
+       console.error("SUPABASE INSERT ERROR:", error);
+       setWebrtcStatus("ERROR Transmitting Offer: " + error.message);
+    } else {
+       console.log("Offer successfully inserted!");
+    }
   };
 
   return (
