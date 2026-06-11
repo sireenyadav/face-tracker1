@@ -113,12 +113,14 @@ class TelemetryDbHelper(context: Context) : SQLiteOpenHelper(context, DATABASE_N
             var activity = ""
             var chapter = ""
             var lecture = 0
+            var startedAt = ""
             if (sessionCursor.moveToFirst()) {
                 subject = sessionCursor.getString(sessionCursor.getColumnIndexOrThrow("subject_tag")) ?: ""
                 exam = sessionCursor.getString(sessionCursor.getColumnIndexOrThrow("target_exam")) ?: ""
                 activity = sessionCursor.getString(sessionCursor.getColumnIndexOrThrow("activity_type")) ?: ""
                 chapter = sessionCursor.getString(sessionCursor.getColumnIndexOrThrow("chapter_name")) ?: ""
                 lecture = sessionCursor.getInt(sessionCursor.getColumnIndexOrThrow("lecture_number"))
+                startedAt = sessionCursor.getString(sessionCursor.getColumnIndexOrThrow("started_at")) ?: ""
             }
             sessionCursor.close()
 
@@ -129,6 +131,7 @@ class TelemetryDbHelper(context: Context) : SQLiteOpenHelper(context, DATABASE_N
                 put("activity_type", activity)
                 put("chapter_name", chapter)
                 put("lecture_number", lecture)
+                put("started_at", startedAt)
                 put("timestamp", cursor.getString(cursor.getColumnIndexOrThrow("timestamp")))
                 put("focus_score", cursor.getInt(cursor.getColumnIndexOrThrow("focus_score")))
                 put("predicted_state", cursor.getString(cursor.getColumnIndexOrThrow("predicted_state")))

@@ -84,7 +84,9 @@ class FocusTelemetryService : LifecycleService() {
             lectureNumber = it.getIntExtra("lectureNumber", 0)
         }
 
-        val startedAt = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss'Z'", Locale.US).format(Date())
+        val sdf = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss'Z'", Locale.US)
+        sdf.timeZone = java.util.TimeZone.getTimeZone("UTC")
+        val startedAt = sdf.format(Date())
         dbHelper.startSession(sessionId, subjectTag, targetExam, activityType, chapterName, lectureNumber, startedAt)
 
         serviceStartTime = System.currentTimeMillis()
@@ -140,7 +142,9 @@ class FocusTelemetryService : LifecycleService() {
                 currentFocusScore = score
                 currentState = state
                 
-                val timestamp = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss'Z'", Locale.US).format(Date())
+                val sdf = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss'Z'", Locale.US)
+                sdf.timeZone = java.util.TimeZone.getTimeZone("UTC")
+                val timestamp = sdf.format(Date())
                 
                 // Extract metrics to save locally (0 lag)
                 try {
@@ -305,7 +309,9 @@ class FocusTelemetryService : LifecycleService() {
     private fun handleSessionStop() {
         stopCameraAnalysis()
         
-        val endedAt = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss'Z'", Locale.US).format(Date())
+        val sdf = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss'Z'", Locale.US)
+        sdf.timeZone = java.util.TimeZone.getTimeZone("UTC")
+        val endedAt = sdf.format(Date())
         dbHelper.stopSession(sessionId, endedAt)
         
         // Final flush before stopping
