@@ -97,6 +97,18 @@ export default function ObserverDashboard() {
       )
       .on(
         'postgres_changes',
+        { event: 'INSERT', schema: 'public', table: 'focus_sessions' },
+        (payload) => {
+          if (payload.new.status === 'active') {
+             setActiveSessionId(payload.new.id);
+             setLiveStatus("Waiting for Telemetry...");
+             setData([]);
+             setCurrentScore(0);
+          }
+        }
+      )
+      .on(
+        'postgres_changes',
         { event: 'UPDATE', schema: 'public', table: 'focus_sessions' },
         (payload) => {
           if (payload.new.status !== 'active') {
