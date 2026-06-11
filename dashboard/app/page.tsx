@@ -109,12 +109,12 @@ type ActiveTab = "dashboard" | "notifications";
 // ---------------------------------------------------------------------------
 // Framer Motion variants
 // ---------------------------------------------------------------------------
-const cardVariants = {
+const cardVariants: any = {
   hidden: { opacity: 0, y: 24 },
   visible: (i: number) => ({
     opacity: 1,
     y: 0,
-    transition: { duration: 0.45, delay: i * 0.07, ease: [0.25, 0.46, 0.45, 0.94] },
+    transition: { duration: 0.45, delay: i * 0.07, ease: "easeOut" },
   }),
 };
 
