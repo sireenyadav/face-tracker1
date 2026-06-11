@@ -19,10 +19,14 @@ import org.json.JSONObject
 class MainActivity: FlutterActivity() {
     private val CHANNEL = "com.facetracker/control"
     private val EVENT_CHANNEL = "com.facetracker/telemetryStream"
+    private val SYNC_CHANNEL = "com.facetracker/syncStream"
     
     private var methodChannel: MethodChannel? = null
     private var eventChannel: EventChannel? = null
+    private var syncEventChannel: EventChannel? = null
+    
     private var eventSink: EventChannel.EventSink? = null
+    private var syncEventSink: EventChannel.EventSink? = null
     
     private val PERMISSIONS_REQUEST_CODE = 1001
     private var pendingStartServiceIntent: Intent? = null
@@ -39,6 +43,21 @@ class MainActivity: FlutterActivity() {
                     "state" to state
                 )
                 eventSink?.success(updateMap)
+            }
+        }
+    }
+
+    private val syncReceiver = object : BroadcastReceiver() {
+        override fun onReceive(context: Context?, intent: Intent?) {
+            if (intent?.action == FocusTelemetryService.ACTION_SYNC_UPDATE) {
+                val syncedRecords = intent.getIntExtra("syncedRecords", 0)
+                val isLive = intent.getBooleanExtra("isLive", false)
+                
+                val updateMap = mapOf(
+                    "syncedRecords" to syncedRecords,
+                    "isLive" to isLive
+                )
+                syncEventSink?.success(updateMap)
             }
         }
     }
@@ -69,6 +88,28 @@ class MainActivity: FlutterActivity() {
             }
         })
         
+        syncEventChannel = EventChannel(flutterEngine.dartExecutor.binaryMessenger, SYNC_CHANNEL)
+        syncEventChannel?.setStreamHandler(object : EventChannel.StreamHandler {
+            override fun onListen(arguments: Any?, events: EventChannel.EventSink?) {
+                syncEventSink = events
+                val filter = IntentFilter(FocusTelemetryService.ACTION_SYNC_UPDATE)
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                    registerReceiver(syncReceiver, filter, Context.RECEIVER_NOT_EXPORTED)
+                } else {
+                    registerReceiver(syncReceiver, filter)
+                }
+            }
+
+            override fun onCancel(arguments: Any?) {
+                syncEventSink = null
+                try {
+                    unregisterReceiver(syncReceiver)
+                } catch (e: Exception) {
+                    // receiver might not be registered
+                }
+            }
+        })
+        
         methodChannel?.setMethodCallHandler { call, result ->
             when (call.method) {
                 "startService" -> {
@@ -77,8 +118,12 @@ class MainActivity: FlutterActivity() {
                         try {
                             val json = JSONObject(configJson)
                             val intent = Intent(this, FocusTelemetryService::class.java).apply {
+                                putExtra("sessionId", json.optString("sessionId"))
                                 putExtra("subjectTag", json.optString("subjectTag"))
                                 putExtra("targetExam", json.optString("targetExam"))
+                                putExtra("activityType", json.optString("activityType"))
+                                putExtra("chapterName", json.optString("chapterName"))
+                                putExtra("lectureNumber", json.optInt("lectureNumber", 0))
                             }
                             
                             val permissionsNeeded = mutableListOf<String>()

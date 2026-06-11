@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
-import 'screens/dashboard_screen.dart';
+import 'screens/main_screen.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -29,7 +29,7 @@ class FocusTelemetryApp extends StatelessWidget {
           secondary: Colors.redAccent,
         ),
       ),
-      home: const DashboardScreen(),
+      home: const MainScreen(),
     );
   }
 }

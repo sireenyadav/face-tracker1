@@ -11,6 +11,9 @@ CREATE TABLE IF NOT EXISTS focus_sessions (
     user_id UUID NOT NULL DEFAULT '00000000-0000-0000-0000-000000000000'::UUID,
     subject_tag TEXT,
     target_exam TEXT,
+    activity_type TEXT,
+    chapter_name TEXT,
+    lecture_number INT,
     started_at TIMESTAMPTZ DEFAULT NOW(),
     ended_at TIMESTAMPTZ,
     status TEXT DEFAULT 'active'
@@ -181,6 +184,9 @@ DECLARE
     v_session_id UUID;
     v_subject_tag TEXT;
     v_target_exam TEXT;
+    v_activity_type TEXT;
+    v_chapter_name TEXT;
+    v_lecture_number INT;
 BEGIN
     -- Unnest the batched JSON Array and insert dynamically
     FOR log_record IN SELECT * FROM jsonb_array_elements(p_telemetry_data)
@@ -189,10 +195,13 @@ BEGIN
         v_session_id := COALESCE((log_record->>'session_id')::UUID, '11111111-1111-1111-1111-111111111111'::UUID);
         v_subject_tag := log_record->>'subject_tag';
         v_target_exam := log_record->>'target_exam';
+        v_activity_type := log_record->>'activity_type';
+        v_chapter_name := log_record->>'chapter_name';
+        v_lecture_number := (log_record->>'lecture_number')::INT;
 
         -- Ensure parent session exists
-        INSERT INTO focus_sessions (id, subject_tag, target_exam)
-        VALUES (v_session_id, v_subject_tag, v_target_exam)
+        INSERT INTO focus_sessions (id, subject_tag, target_exam, activity_type, chapter_name, lecture_number)
+        VALUES (v_session_id, v_subject_tag, v_target_exam, v_activity_type, v_chapter_name, v_lecture_number)
         ON CONFLICT (id) DO NOTHING;
 
         -- Insert the raw probability fusion metrics
