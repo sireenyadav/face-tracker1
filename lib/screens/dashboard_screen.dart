@@ -2,6 +2,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_webrtc/flutter_webrtc.dart';
+import 'package:permission_handler/permission_handler.dart';
 import '../telemetry/webrtc_stream_handler.dart';
 
 const Color emeraldColor = Color(0xFF10B981);
@@ -16,6 +17,11 @@ class DashboardScreen extends StatefulWidget {
 class _DashboardScreenState extends State<DashboardScreen> with SingleTickerProviderStateMixin {
   // Define the method channel matching the native Kotlin pipeline hooks
   static const platform = MethodChannel('com.facetracker.face_tracker/telemetry');
+  static const telemetryStream = EventChannel('com.facetracker/telemetryStream');
+
+  StreamSubscription? _telemetrySubscription;
+  int _liveScore = 100;
+  String _liveState = "Initializing...";
 
   bool _isSessionActive = false;
   int _elapsedSeconds = 0;
@@ -60,9 +66,18 @@ class _DashboardScreenState extends State<DashboardScreen> with SingleTickerProv
 
   @override
   void dispose() {
+    _telemetrySubscription?.cancel();
     _timer?.cancel();
     _pulseController.dispose();
     super.dispose();
+  }
+
+  Future<bool> _requestPermissions() async {
+    Map<Permission, PermissionStatus> statuses = await [
+      Permission.camera,
+      Permission.notification,
+    ].request();
+    return statuses[Permission.camera]!.isGranted && statuses[Permission.notification]!.isGranted;
   }
 
   void _toggleSession() async {
@@ -70,6 +85,7 @@ class _DashboardScreenState extends State<DashboardScreen> with SingleTickerProv
       // ---------------------------------------------------------
       // SURRENDER / STOP SESSION LOGIC
       // ---------------------------------------------------------
+      _telemetrySubscription?.cancel();
       _timer?.cancel();
       _pulseController.stop();
       _pulseController.reset();
@@ -87,8 +103,17 @@ class _DashboardScreenState extends State<DashboardScreen> with SingleTickerProv
       // ---------------------------------------------------------
       // START FOCUS SESSION LOGIC
       // ---------------------------------------------------------
+      if (!await _requestPermissions()) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Camera & Notification permissions are strictly required.")));
+        }
+        return;
+      }
+
       setState(() {
         _elapsedSeconds = 0;
+        _liveScore = 100;
+        _liveState = "Initializing...";
         _isSessionActive = true;
       });
       
@@ -97,6 +122,16 @@ class _DashboardScreenState extends State<DashboardScreen> with SingleTickerProv
       try {
         await platform.invokeMethod('startSession', {
           'subjectTag': _selectedSubject,
+        });
+
+        _telemetrySubscription = telemetryStream.receiveBroadcastStream().listen((event) {
+          final data = Map<String, dynamic>.from(event);
+          if (mounted) {
+            setState(() {
+              _liveScore = data['score'] ?? 100;
+              _liveState = data['state'] ?? "Unknown";
+            });
+          }
         });
       } on PlatformException catch (e) {
         debugPrint("Failed to start session: '${e.message}'.");
@@ -181,6 +216,26 @@ class _DashboardScreenState extends State<DashboardScreen> with SingleTickerProv
                         letterSpacing: -2,
                       ),
                     ),
+                    if (_isSessionActive) ...[
+                      const SizedBox(height: 16),
+                      Text(
+                        "$_liveScore%",
+                        style: TextStyle(
+                          fontSize: 48,
+                          fontWeight: FontWeight.bold,
+                          color: _liveScore >= 75 ? emeraldColor : Colors.redAccent,
+                        ),
+                      ),
+                      Text(
+                        _liveState,
+                        style: const TextStyle(
+                          color: Colors.white70,
+                          fontSize: 16,
+                          fontWeight: FontWeight.w500,
+                          letterSpacing: 1.2,
+                        ),
+                      ),
+                    ],
                   ],
                 ),
               ),
