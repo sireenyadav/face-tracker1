@@ -38,7 +38,6 @@ class _CalibrationScreenState extends State<CalibrationScreen>
 
   // 0.0 = unstable (red) … 1.0 = stable (green)
   double _stabilityFraction = 0.5;
-  bool _isStable = false;
 
   // ── Success animation ─────────────────────────────────────────────────────
   late AnimationController _successController;
@@ -135,7 +134,6 @@ class _CalibrationScreenState extends State<CalibrationScreen>
         _remainingSeconds = (30 - (t.tick)).clamp(0, 30);
         // Simulate increasing stability as time goes on
         _stabilityFraction = (t.tick / 30.0).clamp(0.0, 1.0);
-        _isStable = _stabilityFraction > 0.7;
       });
       if (t.tick >= 30) t.cancel();
     });
@@ -170,7 +168,6 @@ class _CalibrationScreenState extends State<CalibrationScreen>
       _calibrationDone = true;
       _remainingSeconds = 0;
       _stabilityFraction = 1.0;
-      _isStable = true;
     });
 
     _successController.forward();

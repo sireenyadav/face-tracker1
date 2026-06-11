@@ -47,6 +47,7 @@ class MainActivity : FlutterActivity() {
     private val PERMISSIONS_REQUEST_CODE = 1001
     private var pendingStartServiceIntent: Intent? = null
     private var pendingMethodChannelResult: MethodChannel.Result? = null
+    private var pendingRoute: String? = null
 
     // Calibration state
     private var calibrationResult: MethodChannel.Result? = null
@@ -84,6 +85,21 @@ class MainActivity : FlutterActivity() {
                 val updateMap = mapOf("syncedRecords" to syncedRecords, "isLive" to isLive)
                 syncEventSink?.success(updateMap)
             }
+        }
+    }
+
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
+        intent?.getStringExtra("EXTRA_ROUTE")?.let {
+            pendingRoute = it
+        }
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        intent.getStringExtra("EXTRA_ROUTE")?.let {
+            methodChannel?.invokeMethod("route", it)
         }
     }
 
@@ -142,6 +158,10 @@ class MainActivity : FlutterActivity() {
 
         methodChannel?.setMethodCallHandler { call, result ->
             when (call.method) {
+                "getInitialRoute" -> {
+                    result.success(pendingRoute)
+                    pendingRoute = null
+                }
                 "startService" -> {
                     val configJson = call.argument<String>("config")
                     if (configJson != null) {
@@ -198,18 +218,66 @@ class MainActivity : FlutterActivity() {
                     result.success(true)
                 }
                 "pauseCamera" -> {
-                    val intent = Intent(this, FocusTelemetryService::class.java).apply {
+                    val intent = Intent(this@MainActivity, FocusTelemetryService::class.java).apply {
                         action = FocusTelemetryService.ACTION_PAUSE_CAMERA
                     }
-                    startService(intent)
-                    result.success(true)
-                }
-                "resumeCamera" -> {
-                    val intent = Intent(this, FocusTelemetryService::class.java).apply {
-                        action = FocusTelemetryService.ACTION_RESUME_CAMERA
+                    var handled = false
+                    val receiver = object : BroadcastReceiver() {
+                        override fun onReceive(context: Context?, intent: Intent?) {
+                            if (intent?.action == "com.facetracker.CAMERA_RELEASED" && !handled) {
+                                handled = true
+                                result.success(true)
+                                try { unregisterReceiver(this) } catch (e: Exception) {}
+                            }
+                        }
+                    }
+                    val filter = IntentFilter("com.facetracker.CAMERA_RELEASED")
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                        registerReceiver(receiver, filter, Context.RECEIVER_NOT_EXPORTED)
+                    } else {
+                        registerReceiver(receiver, filter)
                     }
                     startService(intent)
-                    result.success(true)
+                    
+                    CoroutineScope(Dispatchers.Main).launch {
+                        delay(2000)
+                        if (!handled) {
+                            handled = true
+                            try { unregisterReceiver(receiver) } catch (e: Exception) {}
+                            result.error("CAMERA_RELEASED_TIMEOUT", "Camera release timed out", null)
+                        }
+                    }
+                }
+                "resumeCamera" -> {
+                    val intent = Intent(this@MainActivity, FocusTelemetryService::class.java).apply {
+                        action = FocusTelemetryService.ACTION_RESUME_CAMERA
+                    }
+                    var handled = false
+                    val receiver = object : BroadcastReceiver() {
+                        override fun onReceive(context: Context?, intent: Intent?) {
+                            if (intent?.action == "com.facetracker.CAMERA_RESUMED" && !handled) {
+                                handled = true
+                                result.success(true)
+                                try { unregisterReceiver(this) } catch (e: Exception) {}
+                            }
+                        }
+                    }
+                    val filter = IntentFilter("com.facetracker.CAMERA_RESUMED")
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                        registerReceiver(receiver, filter, Context.RECEIVER_NOT_EXPORTED)
+                    } else {
+                        registerReceiver(receiver, filter)
+                    }
+                    startService(intent)
+
+                    CoroutineScope(Dispatchers.Main).launch {
+                        delay(2000)
+                        if (!handled) {
+                            handled = true
+                            try { unregisterReceiver(receiver) } catch (e: Exception) {}
+                            result.error("CAMERA_RESUMED_TIMEOUT", "Camera resume timed out", null)
+                        }
+                    }
                 }
                 "runCalibration" -> {
                     // 30-second baseline calibration: collects yaw/pitch readings and computes mean + std dev

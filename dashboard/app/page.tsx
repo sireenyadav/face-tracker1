@@ -187,6 +187,7 @@ export default function ObserverDashboard() {
   const [liveStatus, setLiveStatus]           = useState("Waiting for Telemetry…");
   const [currentScore, setCurrentScore]       = useState(0);
   const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
+  const [isPresenceLive, setIsPresenceLive]   = useState(false);
 
   // -- Session start time for elapsed timer
   const [sessionStartedAt, setSessionStartedAt] = useState<number | null>(null);
@@ -455,6 +456,57 @@ export default function ObserverDashboard() {
   }, []); // ← runs ONCE on mount only
 
   // ---------------------------------------------------------------------------
+  // Postgres Changes Watchdog for Robust Online/Offline Detection
+  // ---------------------------------------------------------------------------
+  useEffect(() => {
+    let timeoutId: ReturnType<typeof setTimeout> | null = null;
+
+    const resetOfflineTimer = () => {
+      if (timeoutId) clearTimeout(timeoutId);
+      setIsPresenceLive(true);
+      // If we stop getting updates for 35 seconds, consider it offline
+      timeoutId = setTimeout(() => {
+        setIsPresenceLive(false);
+        if (activeSessionIdRef.current) {
+          setLiveStatus("Device Offline / Connection Lost");
+        }
+      }, 35000);
+    };
+
+    // Start timer only if we have an active session
+    if (activeSessionId) {
+      resetOfflineTimer();
+    } else {
+      setIsPresenceLive(false);
+    }
+
+    const changesChannel = supabase
+      .channel("table-db-changes")
+      .on(
+        "postgres_changes",
+        { event: "UPDATE", schema: "public", table: "focus_sessions" },
+        (payload) => {
+          // If the update is for our active session
+          if (payload.new.id === activeSessionIdRef.current) {
+            if (payload.new.status === "completed") {
+              if (timeoutId) clearTimeout(timeoutId);
+              setIsPresenceLive(false);
+            } else {
+              // Valid ping
+              resetOfflineTimer();
+            }
+          }
+        }
+      )
+      .subscribe();
+
+    return () => {
+      if (timeoutId) clearTimeout(timeoutId);
+      supabase.removeChannel(changesChannel);
+    };
+  }, [activeSessionId]);
+
+  // ---------------------------------------------------------------------------
   // Bug Fix #1 (cont.) — SEPARATE effect for isVideoActive side-effects
   // ---------------------------------------------------------------------------
   useEffect(() => {
@@ -474,10 +526,22 @@ export default function ObserverDashboard() {
     }
 
     setIsVideoActive(true);
+    setWebrtcStatus("Flushing Stale WebRTC State…");
+
+    // CRITICAL: Flush the pipes completely before starting a new connection
+    await supabase.from("webrtc_signaling").delete().eq("session_id", activeSessionIdRef.current);
+
     setWebrtcStatus("Initializing WebRTC Handshake…");
 
     const configuration: RTCConfiguration = {
-      iceServers: [{ urls: "stun:stun.l.google.com:19302" }],
+      iceServers: [
+        { urls: "stun:stun.l.google.com:19302" },
+        ...(process.env.NEXT_PUBLIC_TURN_URL ? [{
+          urls: process.env.NEXT_PUBLIC_TURN_URL,
+          username: process.env.NEXT_PUBLIC_TURN_USERNAME,
+          credential: process.env.NEXT_PUBLIC_TURN_CREDENTIAL,
+        }] : []),
+      ],
     };
     const pc = new RTCPeerConnection(configuration);
     peerConnectionRef.current = pc;
@@ -495,6 +559,23 @@ export default function ObserverDashboard() {
           session_id: activeSessionIdRef.current,
           type: "candidate_parent",
           payload: JSON.parse(JSON.stringify(event.candidate)),
+        });
+      }
+    };
+
+    pc.oniceconnectionstatechange = async () => {
+      if (pc.iceConnectionState === "disconnected" || pc.iceConnectionState === "failed") {
+        setWebrtcStatus("Connection Lost — Forcing ICE Restart…");
+        const offer = await pc.createOffer({ iceRestart: true });
+        await pc.setLocalDescription(offer);
+
+        // CRITICAL FIX: Wipe out old candidates before sending the new offer
+        await supabase.from("webrtc_signaling").delete().eq("session_id", activeSessionIdRef.current);
+
+        await supabase.from("webrtc_signaling").insert({
+          session_id: activeSessionIdRef.current,
+          type: "offer_parent",
+          payload: { type: offer.type, sdp: offer.sdp, video_request: true },
         });
       }
     };
@@ -534,6 +615,18 @@ export default function ObserverDashboard() {
       type: "offer_parent",
       payload: { type: offer.type, sdp: offer.sdp, video_request: true },
     });
+
+    // 15-second Aggressive TTL
+    setTimeout(() => {
+      if (
+        peerConnectionRef.current &&
+        peerConnectionRef.current.iceConnectionState !== "connected" &&
+        peerConnectionRef.current.iceConnectionState !== "completed"
+      ) {
+        handleTerminateAmbush();
+        setWebrtcStatus("Handshake Timed Out. Please Try Again.");
+      }
+    }, 15000);
   };
 
   const handleTerminateAmbush = async () => {
@@ -690,25 +783,25 @@ export default function ObserverDashboard() {
             <div
               className="flex items-center gap-2 px-4 py-2 rounded-full text-sm font-semibold"
               style={{
-                background: activeSessionId
+                background: (activeSessionId && isPresenceLive)
                   ? "rgba(16,185,129,0.12)"
                   : "rgba(100,116,139,0.12)",
-                border: activeSessionId
+                border: (activeSessionId && isPresenceLive)
                   ? "1px solid rgba(16,185,129,0.35)"
                   : "1px solid rgba(100,116,139,0.25)",
-                color: activeSessionId ? "#10b981" : "#64748b",
+                color: (activeSessionId && isPresenceLive) ? "#10b981" : "#64748b",
               }}
             >
-              {activeSessionId ? (
+              {(activeSessionId && isPresenceLive) ? (
                 <Wifi className="w-4 h-4" />
               ) : (
                 <WifiOff className="w-4 h-4" />
               )}
-              {activeSessionId ? "Live Link Active" : "Offline"}
+              {(activeSessionId && isPresenceLive) ? "Live Link Active" : "Offline"}
             </div>
 
             {/* Elapsed timer */}
-            {activeSessionId && (
+            {(activeSessionId && isPresenceLive) && (
               <div
                 className="flex items-center gap-2 px-4 py-2 rounded-full text-sm font-mono font-bold"
                 style={{

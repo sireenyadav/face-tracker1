@@ -30,7 +30,8 @@ CREATE TABLE IF NOT EXISTS telemetry_logs (
     active_package TEXT NOT NULL,
     yaw FLOAT NOT NULL,
     pitch FLOAT NOT NULL,
-    blink_rate_ema FLOAT NOT NULL
+    blink_rate_ema FLOAT NOT NULL,
+    thermal_throttled BOOLEAN DEFAULT FALSE
 );
 
 -- Highly optimized indexes for time-series range scans and session aggregation
@@ -43,22 +44,21 @@ CREATE INDEX IF NOT EXISTS idx_telemetry_session_timestamp ON telemetry_logs(ses
 -- 2. DEEP SESSION ANALYTICS VIEW
 -- ==============================================================================
 
--- Calculates mathematical mean, hyper-focus percentage, app compliance, and fatigue
-CREATE OR REPLACE VIEW session_analytics_view AS
+-- Calculates mathematical mean, hyper-focus percentage, and app compliance
+CREATE MATERIALIZED VIEW IF NOT EXISTS session_analytics_view AS
 WITH session_durations AS (
     SELECT 
         session_id,
         MIN(timestamp) AS session_start,
         MAX(timestamp) AS session_end,
-        EXTRACT(EPOCH FROM (MAX(timestamp) - MIN(timestamp))) / 60.0 AS total_duration_minutes,
-        COUNT(*) AS total_frames
+        EXTRACT(EPOCH FROM (MAX(timestamp) - MIN(timestamp))) / 60.0 AS total_duration_minutes
     FROM telemetry_logs
     GROUP BY session_id
 ),
 hyper_focus_stats AS (
     SELECT 
         session_id,
-        COUNT(*) AS hyper_focus_frames
+        SUM(CASE WHEN thermal_throttled THEN 6 ELSE 1 END) AS hyper_focus_frames
     FROM telemetry_logs
     WHERE predicted_state = 'Hyper-Focus'
     GROUP BY session_id
@@ -66,7 +66,10 @@ hyper_focus_stats AS (
 educational_app_stats AS (
     SELECT 
         session_id,
-        COUNT(*) AS educational_frames
+        SUM(CASE 
+            WHEN thermal_throttled THEN 6 
+            ELSE 1 
+        END) AS educational_frames
     FROM telemetry_logs
     WHERE active_package IN (
         'com.facetracker.face_tracker', 
@@ -77,16 +80,10 @@ educational_app_stats AS (
     )
     GROUP BY session_id
 ),
-fatigue_metrics AS (
+total_frames_stats AS (
     SELECT 
         session_id,
-        -- Fatigue Index mapping: We calculate the acceleration (slope) of blink_rate_ema over time.
-        -- Linear regression slope formula: Covariance(x, y) / Variance(x)
-        -- Scaled up by 3600 to represent the estimated change in the EMA per hour.
-        COALESCE(
-            COVAR_POP(EXTRACT(EPOCH FROM timestamp), blink_rate_ema) / 
-            NULLIF(VAR_POP(EXTRACT(EPOCH FROM timestamp)), 0), 
-        0) * 3600 AS fatigue_index
+        SUM(CASE WHEN thermal_throttled THEN 6 ELSE 1 END) AS effective_total_frames
     FROM telemetry_logs
     GROUP BY session_id
 )
@@ -98,19 +95,23 @@ SELECT
     sd.session_end,
     sd.total_duration_minutes,
     COALESCE(AVG(t.focus_score), 0) AS average_focus_score,
-    COALESCE((hf.hyper_focus_frames::FLOAT / NULLIF(sd.total_frames, 0)) * 100.0, 0) AS time_in_hyper_focus_pct,
-    fm.fatigue_index,
-    COALESCE((ea.educational_frames::FLOAT / NULLIF(sd.total_frames, 0)), 0) AS app_compliance_ratio
+    COALESCE((hf.hyper_focus_frames::FLOAT / NULLIF(tf.effective_total_frames, 0)) * 100.0, 0) AS time_in_hyper_focus_pct,
+    0::FLOAT AS fatigue_index,
+    COALESCE((ea.educational_frames::FLOAT / NULLIF(tf.effective_total_frames, 0)), 0) AS app_compliance_ratio
 FROM focus_sessions f
 LEFT JOIN telemetry_logs t ON f.id = t.session_id
 LEFT JOIN session_durations sd ON f.id = sd.session_id
 LEFT JOIN hyper_focus_stats hf ON f.id = hf.session_id
 LEFT JOIN educational_app_stats ea ON f.id = ea.session_id
-LEFT JOIN fatigue_metrics fm ON f.id = fm.session_id
+LEFT JOIN total_frames_stats tf ON f.id = tf.session_id
 GROUP BY 
     f.id, f.subject_tag, f.target_exam, sd.session_start, sd.session_end, 
-    sd.total_duration_minutes, hf.hyper_focus_frames, sd.total_frames, 
-    fm.fatigue_index, ea.educational_frames;
+    sd.total_duration_minutes, hf.hyper_focus_frames, tf.effective_total_frames, 
+    ea.educational_frames;
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_session_analytics_id ON session_analytics_view(session_id);
+
+SELECT cron.schedule('refresh-analytics-view', '*/5 * * * *', $$ REFRESH MATERIALIZED VIEW CONCURRENTLY session_analytics_view; $$);
 
 
 -- ==============================================================================
@@ -187,12 +188,19 @@ DECLARE
     v_activity_type TEXT;
     v_chapter_name TEXT;
     v_lecture_number INT;
+    v_status TEXT;
 BEGIN
     -- Unnest the batched JSON Array and insert dynamically
     FOR log_record IN SELECT * FROM jsonb_array_elements(p_telemetry_data)
     LOOP
-        -- Assume a default session generation logic if UUID is not provided by Android
         v_session_id := COALESCE((log_record->>'session_id')::UUID, '11111111-1111-1111-1111-111111111111'::UUID);
+
+        -- Zombie session guard: If the session is already completed, violently reject the batch
+        SELECT status INTO v_status FROM focus_sessions WHERE id = v_session_id;
+        IF v_status = 'completed' THEN
+            RAISE EXCEPTION 'SESSION_COMPLETED_REJECT';
+        END IF;
+
         v_subject_tag := log_record->>'subject_tag';
         v_target_exam := log_record->>'target_exam';
         v_activity_type := log_record->>'activity_type';
@@ -227,3 +235,77 @@ BEGIN
     END LOOP;
 END;
 $$;
+
+
+-- ==============================================================================
+-- 5. API HANDSHAKE & V2 TELEMETRY RPC
+-- ==============================================================================
+
+CREATE OR REPLACE FUNCTION get_system_status()
+RETURNS JSONB
+LANGUAGE plpgsql
+AS $$
+BEGIN
+    RETURN '{"min_supported_client_version": "1.0.1"}'::JSONB;
+END;
+$$;
+
+CREATE OR REPLACE FUNCTION bulk_insert_telemetry_v2(p_telemetry_data JSONB)
+RETURNS VOID
+LANGUAGE plpgsql
+AS $$
+DECLARE
+    log_record JSONB;
+    v_session_id UUID;
+    v_subject_tag TEXT;
+    v_target_exam TEXT;
+    v_activity_type TEXT;
+    v_chapter_name TEXT;
+    v_lecture_number INT;
+    v_status TEXT;
+BEGIN
+    FOR log_record IN SELECT * FROM jsonb_array_elements(p_telemetry_data)
+    LOOP
+        v_session_id := COALESCE((log_record->>'session_id')::UUID, '11111111-1111-1111-1111-111111111111'::UUID);
+
+        SELECT status INTO v_status FROM focus_sessions WHERE id = v_session_id;
+        IF v_status = 'completed' THEN
+            RAISE EXCEPTION 'SESSION_COMPLETED_REJECT';
+        END IF;
+
+        v_subject_tag := log_record->>'subject_tag';
+        v_target_exam := log_record->>'target_exam';
+        v_activity_type := log_record->>'activity_type';
+        v_chapter_name := log_record->>'chapter_name';
+        v_lecture_number := (log_record->>'lecture_number')::INT;
+
+        INSERT INTO focus_sessions (id, subject_tag, target_exam, activity_type, chapter_name, lecture_number)
+        VALUES (v_session_id, v_subject_tag, v_target_exam, v_activity_type, v_chapter_name, v_lecture_number)
+        ON CONFLICT (id) DO NOTHING;
+
+        INSERT INTO telemetry_logs (
+            session_id, 
+            timestamp, 
+            focus_score, 
+            predicted_state, 
+            active_package, 
+            yaw, 
+            pitch, 
+            blink_rate_ema,
+            thermal_throttled
+        ) VALUES (
+            v_session_id,
+            (log_record->>'timestamp')::TIMESTAMPTZ,
+            (log_record->>'focus_score')::INT,
+            log_record->>'predicted_state',
+            COALESCE(log_record->>'active_package', 'com.facetracker.face_tracker'),
+            COALESCE((log_record->>'w_yaw')::FLOAT, 1.0),
+            COALESCE((log_record->>'w_pitch')::FLOAT, 1.0),
+            COALESCE((log_record->>'w_eyes')::FLOAT, 1.0),
+            COALESCE((log_record->>'thermal_throttled')::BOOLEAN, false)
+        );
+    END LOOP;
+END;
+$$;
+
+

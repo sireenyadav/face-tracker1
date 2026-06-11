@@ -1,6 +1,5 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 import 'package:flutter_webrtc/flutter_webrtc.dart';
 import 'package:google_fonts/google_fonts.dart';
 import '../telemetry/webrtc_stream_handler.dart';
@@ -30,7 +29,6 @@ class _VideoAmbushScreenState extends State<VideoAmbushScreen>
   // Phase flags
   bool _isInitializing = true; // WebRTC not yet ready
   bool _isCountingDown = true; // Showing "Parent is watching in 3…2…1"
-  bool _isLive = false;         // Showing live feed
 
   // Countdown
   int _countdownValue = 3;
@@ -94,7 +92,6 @@ class _VideoAmbushScreenState extends State<VideoAmbushScreen>
         if (mounted) {
           setState(() {
             _isCountingDown = false;
-            _isLive = true;
           });
         }
         return;

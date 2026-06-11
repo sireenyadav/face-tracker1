@@ -46,28 +46,23 @@ class FaceAnalyzer(
     // Process at most one frame every 500 ms → ~2 FPS for ML Kit
     private var lastInferenceTimeMs = 0L
 
-    // ── Blink FSM ─────────────────────────────────────────────────────────────
-    private enum class BlinkState { OPEN, CLOSING, CLOSED, OPENING }
-
-    private var blinkState = BlinkState.OPEN
-    private var blinkStateEnteredMs = System.currentTimeMillis()
-
-    // Rolling window of blink completion timestamps within the last 60 seconds
-    private val blinkTimestamps = ArrayDeque<Long>()
-
-    // EMA of eye openness — only updated while OPEN or OPENING
-    private var eyeOpenEMA = 1.0
-    private val alphaEyes = 0.15   // slow to react = stable
-
-    // Current eyeFactor derived from the blink FSM
+    // ── Blink tracking ────────────────────────────────────────────────────────
+    private var consecutiveClosedFrames = 0
     private var eyeFactor = 1.0
 
-    // ── Temporal Attention Engine ─────────────────────────────────────────────
-    // 10-element rolling history, one entry per second (1 Hz push, 10 s window)
-    private val pitchHistory = ArrayDeque<Float>() // calibrated pitch values
-    private val yawHistory   = ArrayDeque<Float>() // calibrated yaw values
-    private val maxHistorySize = 10
+    // Temporal Attention Engine
+    // History (timestamped for thermal throttling immunity)
+    private val pitchHistory = java.util.concurrent.ConcurrentLinkedDeque<Pair<Long, Float>>()
+    private val yawHistory   = java.util.concurrent.ConcurrentLinkedDeque<Pair<Long, Float>>()
     private var lastHistoryPushMs = 0L
+
+    // Thermal Throttling Hook
+    @Volatile
+    var isThermalThrottling = false
+
+    // Reading Offline Tracker
+    private var readingOfflineConsecutiveMs = 0L
+    private var lastStateTimeMs = 0L
 
     // Exponential weights — most recent = 1.0, each step back * 0.85
     private val decayFactor = 0.85
@@ -95,8 +90,19 @@ class FaceAnalyzer(
     override fun analyze(imageProxy: ImageProxy) {
         val nowMs = System.currentTimeMillis()
 
-        // 500 ms gate → ~2 FPS inference
-        if (nowMs - lastInferenceTimeMs < 500) {
+        // Track how long we've been in READING_OFFLINE
+        if (lastStateTimeMs != 0L && currentState == "READING_OFFLINE") {
+            readingOfflineConsecutiveMs += (nowMs - lastStateTimeMs)
+        } else if (currentState != "READING_OFFLINE") {
+            readingOfflineConsecutiveMs = 0L
+        }
+        lastStateTimeMs = nowMs
+
+        // Dynamic Inference Gate: 3000ms if throttling or stable offline for > 5 mins
+        val isStableOffline = readingOfflineConsecutiveMs > 5 * 60 * 1000L
+        val inferenceIntervalMs = if (isThermalThrottling || isStableOffline) 3000L else 500L
+
+        if (nowMs - lastInferenceTimeMs < inferenceIntervalMs) {
             imageProxy.close()
             return
         }
@@ -138,19 +144,24 @@ class FaceAnalyzer(
                 // Detection confidence based on tracking ID availability
                 val detectionConfidence = if (face.trackingId != null) 1.0 else 0.75
 
-                // ── Blink FSM ─────────────────────────────────────────────────
+                // ── Blink Tracking (Microsleeps only) ─────────────────────────
                 val leftEyeProb  = (face.leftEyeOpenProbability  ?: 1.0f).toDouble()
                 val rightEyeProb = (face.rightEyeOpenProbability ?: 1.0f).toDouble()
                 val eyeProb      = (leftEyeProb + rightEyeProb) / 2.0
 
-                updateBlinkFSM(eyeProb, frameMs)
+                if (eyeProb < 0.4) {
+                    consecutiveClosedFrames++
+                } else {
+                    consecutiveClosedFrames = 0
+                }
+
+                // If eyes closed for 2+ consecutive frames (>= 1000ms), heavy penalty
+                eyeFactor = if (consecutiveClosedFrames >= 2) 0.30 else 1.0
 
                 // ── Temporal history push (1 Hz) ──────────────────────────────
                 if (frameMs - lastHistoryPushMs >= 1000L) {
-                    if (pitchHistory.size >= maxHistorySize) pitchHistory.removeFirst()
-                    if (yawHistory.size   >= maxHistorySize) yawHistory.removeFirst()
-                    pitchHistory.addLast(calibratedPitch)
-                    yawHistory.addLast(calibratedYaw)
+                    pitchHistory.addLast(Pair(frameMs, calibratedPitch))
+                    yawHistory.addLast(Pair(frameMs, calibratedYaw))
                     lastHistoryPushMs = frameMs
 
                     // Recompute weighted statistics
@@ -182,9 +193,8 @@ class FaceAnalyzer(
                 smoothedScore = alphaScore * rawScore + (1.0 - alphaScore) * smoothedScore
                 smoothedScore = smoothedScore.coerceIn(0.0, 100.0)
 
-                // ── Blink rate per minute ─────────────────────────────────────
-                pruneBlinkTimestamps(frameMs)
-                val blinkRatePerMin = blinkTimestamps.size  // counts blinks in last 60 s
+                // ── Blink rate removed due to Nyquist sampling limits ─────────
+                val blinkRatePerMin = 0
 
                 // ── Emit telemetry ────────────────────────────────────────────
                 val json = JSONObject().apply {
@@ -209,83 +219,7 @@ class FaceAnalyzer(
             }
     }
 
-    // ── Blink FSM update ──────────────────────────────────────────────────────
-    /**
-     * Drives the 4-state blink FSM and updates [eyeFactor].
-     *
-     * States:   OPEN → CLOSING → CLOSED → OPENING → OPEN
-     *
-     * eyeFactor values by state × closed-duration:
-     *   OPEN / OPENING          → slow EMA of raw eye openness
-     *   CLOSING                 → EMA × 0.85
-     *   CLOSED < 400 ms         → 0.85   (normal blink, minimal penalty)
-     *   CLOSED 400–700 ms       → 0.60   (drowsy blink)
-     *   CLOSED > 700 ms         → 0.30   (microsleep)
-     */
-    private fun updateBlinkFSM(eyeProb: Double, nowMs: Long) {
-        val closedDurationMs = nowMs - blinkStateEnteredMs
-
-        when (blinkState) {
-            BlinkState.OPEN -> {
-                // Update EMA while fully open
-                eyeOpenEMA = alphaEyes * eyeProb + (1.0 - alphaEyes) * eyeOpenEMA
-                eyeFactor  = eyeOpenEMA
-
-                if (eyeProb < 0.4) {
-                    transitionBlink(BlinkState.CLOSING, nowMs)
-                }
-            }
-
-            BlinkState.CLOSING -> {
-                // Moderate penalty on the way down
-                eyeFactor = eyeOpenEMA * 0.85
-
-                when {
-                    eyeProb < 0.25 -> transitionBlink(BlinkState.CLOSED, nowMs)
-                    eyeProb > 0.7  -> transitionBlink(BlinkState.OPEN,   nowMs) // false alarm
-                }
-            }
-
-            BlinkState.CLOSED -> {
-                // Eye factor depends on how long they have been closed
-                eyeFactor = when {
-                    closedDurationMs < 400  -> 0.85
-                    closedDurationMs < 700  -> 0.60
-                    else                    -> 0.30
-                }
-
-                if (eyeProb > 0.3) {
-                    // Record completed blink only for normal / drowsy durations
-                    if (closedDurationMs < 700) {
-                        blinkTimestamps.addLast(nowMs)
-                    }
-                    transitionBlink(BlinkState.OPENING, nowMs)
-                }
-            }
-
-            BlinkState.OPENING -> {
-                // Gently ramp EMA back up
-                eyeOpenEMA = alphaEyes * eyeProb + (1.0 - alphaEyes) * eyeOpenEMA
-                eyeFactor  = eyeOpenEMA
-
-                if (eyeProb > 0.7) {
-                    transitionBlink(BlinkState.OPEN, nowMs)
-                }
-            }
-        }
-    }
-
-    private fun transitionBlink(next: BlinkState, nowMs: Long) {
-        blinkState            = next
-        blinkStateEnteredMs   = nowMs
-    }
-
-    /** Drop blink timestamps older than 60 seconds. */
-    private fun pruneBlinkTimestamps(nowMs: Long) {
-        while (blinkTimestamps.isNotEmpty() && nowMs - blinkTimestamps.first() > 60_000L) {
-            blinkTimestamps.removeFirst()
-        }
-    }
+    // FSM removed to avoid Nyquist-Shannon violation at 2 FPS
 
     // ── Temporal Attention Engine ─────────────────────────────────────────────
     /**
@@ -295,6 +229,20 @@ class FaceAnalyzer(
      * Variance = E[x²] − (E[x])²  using the same weights.
      */
     private fun recomputeWeightedStats() {
+        val nowMs = System.currentTimeMillis()
+        
+        // Eviction window: 10s normally, 60s when throttled (to maintain N=20 points)
+        val isStableOffline = readingOfflineConsecutiveMs > 5 * 60 * 1000L
+        val evictionWindowMs = if (isThermalThrottling || isStableOffline) 60000L else 10000L
+
+        // Evict stale history
+        while (pitchHistory.peekFirst()?.first?.let { nowMs - it > evictionWindowMs } == true) {
+            pitchHistory.removeFirst()
+        }
+        while (yawHistory.peekFirst()?.first?.let { nowMs - it > evictionWindowMs } == true) {
+            yawHistory.removeFirst()
+        }
+
         weightedMeanPitch  = computeWeightedMean(pitchHistory)
         weightedMeanYaw    = computeWeightedMean(yawHistory)
         weightedVarPitch   = computeWeightedVariance(pitchHistory, weightedMeanPitch)
@@ -304,32 +252,36 @@ class FaceAnalyzer(
         motionStability = 1.0 / (1.0 + weightedVarPitch / 10.0 + weightedVarYaw / 10.0)
     }
 
-    private fun computeWeightedMean(history: ArrayDeque<Float>): Double {
+    private fun computeWeightedMean(history: java.util.concurrent.ConcurrentLinkedDeque<Pair<Long, Float>>): Double {
         if (history.isEmpty()) return 0.0
         var weightSum   = 0.0
         var weightedSum = 0.0
         val size = history.size
-        for (i in history.indices) {
+        var i = 0
+        for (item in history) {
             // The last element (most recent) has index size-1 → power 0 → weight 1.0
             val age    = (size - 1 - i)
             val weight = decayFactor.pow(age)
-            weightedSum += weight * history[i]
+            weightedSum += weight * item.second
             weightSum   += weight
+            i++
         }
         return if (weightSum > 0.0) weightedSum / weightSum else 0.0
     }
 
-    private fun computeWeightedVariance(history: ArrayDeque<Float>, mean: Double): Double {
+    private fun computeWeightedVariance(history: java.util.concurrent.ConcurrentLinkedDeque<Pair<Long, Float>>, mean: Double): Double {
         if (history.size < 2) return 0.0
         var weightSum    = 0.0
         var weightedSumSq = 0.0
         val size = history.size
-        for (i in history.indices) {
+        var i = 0
+        for (item in history) {
             val age    = (size - 1 - i)
             val weight = decayFactor.pow(age)
-            val diff   = history[i] - mean
+            val diff   = item.second - mean
             weightedSumSq += weight * diff * diff
             weightSum     += weight
+            i++
         }
         return if (weightSum > 0.0) weightedSumSq / weightSum else 0.0
     }
@@ -352,7 +304,7 @@ class FaceAnalyzer(
         // |calibratedYaw| > 35 sustained for 3+ consecutive history entries
         // (each entry ~1 s → 3+ seconds of continuous distraction)
         val distracted = yawHistory.size >= 3 &&
-            yawHistory.takeLast(3).all { abs(it) > 35f }
+            yawHistory.toList().takeLast(3).all { abs(it.second) > 35f }
 
         if (distracted) {
             distractedConsecutiveSeconds++
@@ -371,8 +323,9 @@ class FaceAnalyzer(
         // check the instantaneous delta from this frame vs the most recent stored
         // entry which was captured at most 500 ms ago).
         if (pitchHistory.size >= 2) {
-            val latestStored = pitchHistory.last()
-            val prevStored   = pitchHistory[pitchHistory.size - 2]
+            val historyList = pitchHistory.toList()
+            val latestStored = historyList.last().second
+            val prevStored   = historyList[historyList.size - 2].second
             // Downward pitch = increasingly negative calibratedPitch
             val storedDelta  = latestStored - prevStored      // stored 1 s apart
             val liveToStored = calibratedPitch - latestStored // this frame minus last stored
@@ -385,9 +338,8 @@ class FaceAnalyzer(
         }
 
         // ── 3. DROWSY ─────────────────────────────────────────────────────────
-        val closedMs    = nowMs - blinkStateEnteredMs
-        val isDrowsy    = (blinkState == BlinkState.CLOSED && closedMs > 700L)
-        val highBlink   = blinkTimestamps.size > 25 // > 25 blinks in the last 60 s
+        val isDrowsy    = (consecutiveClosedFrames >= 2)
+        val highBlink   = false // Deprecated due to Nyquist sampling limits
 
         if (isDrowsy || highBlink) {
             return "DROWSY"

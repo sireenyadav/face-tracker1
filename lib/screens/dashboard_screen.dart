@@ -1,6 +1,5 @@
 import 'dart:async';
 import 'dart:convert';
-import 'dart:io';
 import 'package:fl_chart/fl_chart.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -12,7 +11,6 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:uuid/uuid.dart';
 import '../theme/app_theme.dart';
 import '../components/glass_container.dart';
-import '../components/animated_toggle_chip.dart';
 import '../components/premium_text_field.dart';
 import '../components/animated_mesh_background.dart';
 import '../components/study_timeline_card.dart';
@@ -58,10 +56,12 @@ class _DashboardScreenState extends State<DashboardScreen>
   StreamSubscription? _telemetrySubscription;
   StreamSubscription? _syncSubscription;
 
+  RealtimeChannel? _presenceChannel;
+  Timer? _keepAliveTimer;
+
   // ── Live telemetry ────────────────────────────────────────────────────────
   int _liveScore = 100;
   String _liveState = 'Initializing...';
-  String _syncStatus = 'Awaiting Sync...';
   bool _isLiveStreaming = false;
 
   // ── Session state ─────────────────────────────────────────────────────────
@@ -73,7 +73,6 @@ class _DashboardScreenState extends State<DashboardScreen>
   Timer? _timer;
 
   // ── DB + UI state ─────────────────────────────────────────────────────────
-  bool _isDbConnected = false;
   String _selectedSubject = 'Physics';
   String _activityType = 'Lecture';
   String _chapterName = '';
@@ -95,10 +94,6 @@ class _DashboardScreenState extends State<DashboardScreen>
   final List<double> _recentScores = [];
 
   // ── Calibration values ────────────────────────────────────────────────────
-  double _calibBaselineYaw = 0.0;
-  double _calibBaselinePitch = 0.0;
-  double _calibSigmaYaw = 15.0;
-  double _calibSigmaPitch = 20.0;
 
   // ── NECK_STRAIN broadcast receiver ───────────────────────────────────────
   // We set up a handler on the BasicMessageChannel to receive native events.
@@ -126,18 +121,7 @@ class _DashboardScreenState extends State<DashboardScreen>
   // ── Calibration prefs ─────────────────────────────────────────────────────
 
   Future<void> _loadCalibrationPrefs() async {
-    final prefs = await SharedPreferences.getInstance();
-    if (!mounted) return;
-    setState(() {
-      _calibBaselineYaw =
-          prefs.getDouble('calib_baseline_yaw') ?? 0.0;
-      _calibBaselinePitch =
-          prefs.getDouble('calib_baseline_pitch') ?? 0.0;
-      _calibSigmaYaw =
-          prefs.getDouble('calib_sigma_yaw') ?? 15.0;
-      _calibSigmaPitch =
-          prefs.getDouble('calib_sigma_pitch') ?? 20.0;
-    });
+    // Calibration parameters have been removed.
   }
 
   Future<void> _openCalibrationScreen() async {
@@ -145,12 +129,7 @@ class _DashboardScreenState extends State<DashboardScreen>
       MaterialPageRoute(builder: (_) => const CalibrationScreen()),
     );
     if (result != null) {
-      setState(() {
-        _calibBaselineYaw = result['baselineYaw'] as double;
-        _calibBaselinePitch = result['baselinePitch'] as double;
-        _calibSigmaYaw = result['sigmaYaw'] as double;
-        _calibSigmaPitch = result['sigmaPitch'] as double;
-      });
+      // Calibration parameters have been removed.
     }
   }
 
@@ -200,9 +179,8 @@ class _DashboardScreenState extends State<DashboardScreen>
           .from('focus_sessions')
           .select('id')
           .limit(1);
-      if (mounted) setState(() => _isDbConnected = true);
     } catch (e) {
-      if (mounted) setState(() => _isDbConnected = false);
+      // Ignore
     }
   }
 
@@ -274,6 +252,12 @@ class _DashboardScreenState extends State<DashboardScreen>
     _pulseController.dispose();
     _elapsedSecondsNotifier.dispose();
     _neckStrainChannel.setMessageHandler(null);
+    
+    _keepAliveTimer?.cancel();
+    _presenceChannel?.untrack();
+    if (_presenceChannel != null) {
+      Supabase.instance.client.removeChannel(_presenceChannel!);
+    }
     super.dispose();
   }
 
@@ -298,6 +282,14 @@ class _DashboardScreenState extends State<DashboardScreen>
       _timer?.cancel();
       _pulseController.stop();
       _pulseController.reset();
+
+      // Presence & Keep-Alive cleanup
+      _keepAliveTimer?.cancel();
+      _presenceChannel?.untrack();
+      if (_presenceChannel != null) {
+        Supabase.instance.client.removeChannel(_presenceChannel!);
+        _presenceChannel = null;
+      }
 
       // Finalize session via RPC BEFORE stopping native service
       try {
@@ -351,7 +343,6 @@ class _DashboardScreenState extends State<DashboardScreen>
       setState(() {
         _liveScore = 100;
         _liveState = 'Initializing...';
-        _syncStatus = 'Awaiting Sync...';
         _isSessionActive = true;
         _currentSessionId = newSessionId;
         _recentScores.clear();
@@ -432,6 +423,26 @@ class _DashboardScreenState extends State<DashboardScreen>
       // Timer now only updates the ValueNotifier — no full setState
       _timer = Timer.periodic(const Duration(seconds: 1), (timer) {
         _elapsedSecondsNotifier.value++;
+      });
+
+      // Presence
+      _presenceChannel = Supabase.instance.client.channel('presence:focus_sessions');
+      _presenceChannel?.subscribe((status, error) {
+        if (status == RealtimeSubscribeStatus.subscribed) {
+          _presenceChannel?.track({
+            'session_id': _currentSessionId,
+            'status': 'online',
+          });
+        }
+      });
+
+      // Keep-alive for pg_cron
+      _keepAliveTimer = Timer.periodic(const Duration(seconds: 10), (_) {
+        try {
+          Supabase.instance.client.from('focus_sessions').update({
+            'last_telemetry_at': DateTime.now().toUtc().toIso8601String(),
+          }).eq('id', _currentSessionId);
+        } catch (_) {}
       });
 
       _listenForVideoRequests(_currentSessionId);

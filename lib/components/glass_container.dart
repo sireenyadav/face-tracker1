@@ -26,7 +26,6 @@ class GlassContainer extends StatelessWidget {
     // For true glass, we use white regardless of theme, just differing opacities
     final glassColor = isDarkMode ? Colors.white.withValues(alpha: 0.05) : Colors.white.withValues(alpha: 0.2);
     final borderTop = isDarkMode ? Colors.white.withValues(alpha: 0.2) : Colors.white.withValues(alpha: 0.5);
-    final borderBottom = isDarkMode ? Colors.white.withValues(alpha: 0.02) : Colors.white.withValues(alpha: 0.1);
 
     return ClipRRect(
       borderRadius: borderRadius,

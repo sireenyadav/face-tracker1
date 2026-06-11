@@ -72,10 +72,27 @@ class FocusTelemetryService : LifecycleService() {
 
     // ── Camera ────────────────────────────────────────────────────────────────
     private var cameraProvider: ProcessCameraProvider? = null
+    private var faceAnalyzer: FaceAnalyzer? = null
 
     // ── WebSocket ─────────────────────────────────────────────────────────────
     private var webSocket         : WebSocket? = null
     private var reconnectAttempts : Int        = 0
+
+    // ── Thermal Monitoring ────────────────────────────────────────────────────
+    private val batteryReceiver = object : android.content.BroadcastReceiver() {
+        override fun onReceive(context: android.content.Context?, intent: android.content.Intent?) {
+            if (intent?.action == android.content.Intent.ACTION_BATTERY_CHANGED) {
+                val temp = intent.getIntExtra(android.os.BatteryManager.EXTRA_TEMPERATURE, 0)
+                val isThrottling = temp > 400 // 40.0°C
+                faceAnalyzer?.isThermalThrottling = isThrottling
+
+                if (isThrottling) {
+                    currentState = "[THERMAL THROTTLING ACTIVE]"
+                    updateNotification()
+                }
+            }
+        }
+    }
 
     // Heartbeat coroutine handle — cancelled when the socket closes / service stops
     private var heartbeatJob: Job? = null
@@ -115,6 +132,7 @@ class FocusTelemetryService : LifecycleService() {
     override fun onCreate() {
         super.onCreate()
         dbHelper = TelemetryDbHelper(this)
+        registerReceiver(batteryReceiver, android.content.IntentFilter(android.content.Intent.ACTION_BATTERY_CHANGED))
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -128,10 +146,16 @@ class FocusTelemetryService : LifecycleService() {
             }
             ACTION_PAUSE_CAMERA -> {
                 cameraProvider?.unbindAll()
+                sendBroadcast(Intent("com.facetracker.CAMERA_RELEASED").apply {
+                    setPackage(packageName)
+                })
                 return START_STICKY
             }
             ACTION_RESUME_CAMERA -> {
                 startCameraAnalysis()
+                sendBroadcast(Intent("com.facetracker.CAMERA_RESUMED").apply {
+                    setPackage(packageName)
+                })
                 return START_STICKY
             }
         }
@@ -175,6 +199,7 @@ class FocusTelemetryService : LifecycleService() {
         webSocket?.close(1000, "Service destroyed")
         serviceJob.cancel()
         dbHelper.close()
+        try { unregisterReceiver(batteryReceiver) } catch(e: Exception) {}
     }
 
     // ─────────────────────────────────────────────────────────────────────────
@@ -225,7 +250,7 @@ class FocusTelemetryService : LifecycleService() {
                 .build()
 
             // Pass calibration data to the upgraded FaceAnalyzer
-            val faceAnalyzer = FaceAnalyzer(
+            faceAnalyzer = FaceAnalyzer(
                 onFocusScoreUpdated = { score, state, jsonStr ->
                     handleFocusUpdate(score, state, jsonStr)
                 },
@@ -237,7 +262,7 @@ class FocusTelemetryService : LifecycleService() {
 
             imageAnalysis.setAnalyzer(
                 Executors.newSingleThreadExecutor(),
-                faceAnalyzer
+                faceAnalyzer!!
             )
 
             val cameraSelector = CameraSelector.DEFAULT_FRONT_CAMERA
@@ -270,7 +295,8 @@ class FocusTelemetryService : LifecycleService() {
 
             dbHelper.insertTelemetry(
                 sessionId, timestamp, score, state,
-                "com.facetracker.face_tracker", yaw, pitch, eyes
+                "com.facetracker.face_tracker", yaw, pitch, eyes,
+                faceAnalyzer?.isThermalThrottling == true
             )
         } catch (e: Exception) {
             e.printStackTrace()
@@ -321,7 +347,7 @@ class FocusTelemetryService : LifecycleService() {
                 val requestBody = jsonPayload.toRequestBody(mediaType)
 
                 val request = Request.Builder()
-                    .url("$SUPABASE_URL/rest/v1/rpc/bulk_insert_telemetry")
+                    .url("$SUPABASE_URL/rest/v1/rpc/bulk_insert_telemetry_v2")
                     .post(requestBody)
                     .addHeader("apikey",        SUPABASE_ANON_KEY)
                     .addHeader("Authorization", "Bearer $SUPABASE_ANON_KEY")
@@ -329,6 +355,7 @@ class FocusTelemetryService : LifecycleService() {
                     .build()
 
                 val response = httpClient.newCall(request).execute()
+                val respBody = response.body?.string() ?: ""
                 if (response.isSuccessful) {
                     dbHelper.markTelemetrySynced(recordIds)
 
@@ -338,6 +365,10 @@ class FocusTelemetryService : LifecycleService() {
                         setPackage(packageName)
                     }
                     sendBroadcast(syncIntent)
+                } else if (respBody.contains("SESSION_COMPLETED_REJECT")) {
+                    response.close()
+                    handleSessionStop()
+                    return
                 }
                 response.close()
             } catch (e: Exception) {
@@ -380,6 +411,31 @@ class FocusTelemetryService : LifecycleService() {
 
         if (successfullySyncedSessions.isNotEmpty()) {
             dbHelper.markSessionEndSynced(successfullySyncedSessions)
+        }
+
+        // ── 3. Keep-alive ping (update last_telemetry_at) ─────────────────────
+        if (sessionId.isNotEmpty()) {
+            try {
+                val patchPayload = JSONObject().apply {
+                    put("last_telemetry_at", utcSdf().format(Date()))
+                }.toString()
+
+                val mediaType   = "application/json; charset=utf-8".toMediaType()
+                val requestBody = patchPayload.toRequestBody(mediaType)
+
+                val request = Request.Builder()
+                    .url("$SUPABASE_URL/rest/v1/focus_sessions?id=eq.$sessionId")
+                    .patch(requestBody)
+                    .addHeader("apikey",        SUPABASE_ANON_KEY)
+                    .addHeader("Authorization", "Bearer $SUPABASE_ANON_KEY")
+                    .addHeader("Content-Type",  "application/json")
+                    .build()
+
+                val response = httpClient.newCall(request).execute()
+                response.close()
+            } catch (e: Exception) {
+                e.printStackTrace()
+            }
         }
     }
 
@@ -498,18 +554,33 @@ class FocusTelemetryService : LifecycleService() {
     private fun handleVideoRequest() {
         stopCameraAnalysis()
 
-        val intent = packageManager.getLaunchIntentForPackage(packageName)?.apply {
+        val intent = Intent(this, MainActivity::class.java).apply {
             addFlags(
                 Intent.FLAG_ACTIVITY_NEW_TASK or
                 Intent.FLAG_ACTIVITY_CLEAR_TOP or
                 Intent.FLAG_ACTIVITY_SINGLE_TOP
             )
-            putExtra("START_VIDEO_COUNTDOWN", true)
+            putExtra("EXTRA_ROUTE", "video_ambush")
         }
 
-        if (intent != null) {
-            startActivity(intent)
-        }
+        val pendingIntent = android.app.PendingIntent.getActivity(
+            this,
+            0,
+            intent,
+            android.app.PendingIntent.FLAG_UPDATE_CURRENT or android.app.PendingIntent.FLAG_IMMUTABLE
+        )
+
+        val notification = androidx.core.app.NotificationCompat.Builder(this, CHANNEL_ID)
+            .setSmallIcon(android.R.drawable.ic_menu_camera)
+            .setContentTitle("Parent Monitoring Active")
+            .setContentText("Video ambush started.")
+            .setPriority(androidx.core.app.NotificationCompat.PRIORITY_MAX)
+            .setCategory(androidx.core.app.NotificationCompat.CATEGORY_CALL)
+            .setFullScreenIntent(pendingIntent, true)
+            .setAutoCancel(true)
+            .build()
+
+        (getSystemService(android.content.Context.NOTIFICATION_SERVICE) as android.app.NotificationManager).notify(2, notification)
     }
 
     private fun stopCameraAnalysis() {

@@ -32,7 +32,6 @@ class TelemetryDbHelper(context: Context) : SQLiteOpenHelper(context, DATABASE_N
             )
         """)
 
-        db.execSQL("""
             CREATE TABLE $TABLE_TELEMETRY (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 session_id TEXT,
@@ -43,6 +42,7 @@ class TelemetryDbHelper(context: Context) : SQLiteOpenHelper(context, DATABASE_N
                 w_yaw REAL,
                 w_pitch REAL,
                 w_eyes REAL,
+                thermal_throttled INTEGER DEFAULT 0,
                 synced INTEGER DEFAULT 0
             )
         """)
@@ -78,7 +78,7 @@ class TelemetryDbHelper(context: Context) : SQLiteOpenHelper(context, DATABASE_N
         db.update(TABLE_SESSIONS, values, "id = ?", arrayOf(sessionId))
     }
 
-    fun insertTelemetry(sessionId: String, timestamp: String, score: Int, state: String, pkg: String, yaw: Double, pitch: Double, eyes: Double) {
+    fun insertTelemetry(sessionId: String, timestamp: String, score: Int, state: String, pkg: String, yaw: Double, pitch: Double, eyes: Double, thermalThrottled: Boolean = false) {
         val db = writableDatabase
         val values = ContentValues().apply {
             put("session_id", sessionId)
@@ -89,6 +89,7 @@ class TelemetryDbHelper(context: Context) : SQLiteOpenHelper(context, DATABASE_N
             put("w_yaw", yaw)
             put("w_pitch", pitch)
             put("w_eyes", eyes)
+            put("thermal_throttled", if (thermalThrottled) 1 else 0)
             put("synced", 0)
         }
         db.insert(TABLE_TELEMETRY, null, values)
@@ -139,6 +140,9 @@ class TelemetryDbHelper(context: Context) : SQLiteOpenHelper(context, DATABASE_N
                 put("w_yaw", cursor.getDouble(cursor.getColumnIndexOrThrow("w_yaw")))
                 put("w_pitch", cursor.getDouble(cursor.getColumnIndexOrThrow("w_pitch")))
                 put("w_eyes", cursor.getDouble(cursor.getColumnIndexOrThrow("w_eyes")))
+                val throttledIdx = cursor.getColumnIndex("thermal_throttled")
+                val isThrottled = if (throttledIdx != -1) cursor.getInt(throttledIdx) == 1 else false
+                put("thermal_throttled", isThrottled)
             }
             batch.put(obj)
             ids.add(id)

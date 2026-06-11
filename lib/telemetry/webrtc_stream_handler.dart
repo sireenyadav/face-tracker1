@@ -8,7 +8,8 @@ class WebRTCStreamHandler {
   RTCPeerConnection? _peerConnection;
   MediaStream? _localStream;
   final SupabaseClient _supabase = Supabase.instance.client;
-  
+
+
   // Expose the renderer for the tiny preview indicator
   RTCVideoRenderer localRenderer = RTCVideoRenderer();
   
@@ -21,7 +22,8 @@ class WebRTCStreamHandler {
   Future<void> initialize() async {
     await localRenderer.initialize();
 
-    // Standard free public STUN configuration
+    // Standard public STUN & Enterprise Metered TURN configuration
+    // (Replace username/credential with actual credentials from Metered Video Dashboard)
     final Map<String, dynamic> configuration = {
       'iceServers': [
         {
@@ -29,6 +31,21 @@ class WebRTCStreamHandler {
             'stun:stun.l.google.com:19302',
             'stun:stun1.l.google.com:19302'
           ]
+        },
+        {
+          'urls': 'turn:global.relay.metered.ca:80',
+          'username': 'INSERT_METERED_USERNAME_HERE',
+          'credential': 'INSERT_METERED_PASSWORD_HERE'
+        },
+        {
+          'urls': 'turn:global.relay.metered.ca:443',
+          'username': 'INSERT_METERED_USERNAME_HERE',
+          'credential': 'INSERT_METERED_PASSWORD_HERE'
+        },
+        {
+          'urls': 'turn:global.relay.metered.ca:443?transport=tcp',
+          'username': 'INSERT_METERED_USERNAME_HERE',
+          'credential': 'INSERT_METERED_PASSWORD_HERE'
         }
       ]
     };
@@ -51,8 +68,8 @@ class WebRTCStreamHandler {
       const platform = MethodChannel('com.facetracker/control');
       await platform.invokeMethod('pauseCamera');
       
-      // Add a tiny delay to ensure hardware is fully released
-      await Future.delayed(const Duration(milliseconds: 500));
+      // Hardware is guaranteed released by native layer now, no need for large delay
+      await Future.delayed(const Duration(milliseconds: 100));
 
       _localStream = await navigator.mediaDevices.getUserMedia(mediaConstraints);
       localRenderer.srcObject = _localStream;
@@ -60,8 +77,19 @@ class WebRTCStreamHandler {
       _localStream!.getTracks().forEach((track) {
         _peerConnection!.addTrack(track, _localStream!);
       });
+    } on PlatformException catch (e) {
+      debugPrint("CRITICAL IPC ERROR: Failed to pause native camera: ${e.message}");
+      // In a real app we might show an alert overlay here.
+      return;
     } catch (e) {
       debugPrint("CRITICAL: Failed to bind User Media - $e");
+      // Alert the parent dashboard of the connection failure
+      await _supabase.from('webrtc_signaling').insert({
+        'session_id': sessionId,
+        'type': 'error_tablet',
+        'payload': {'message': 'Camera release timed out. Connection aborted.'}
+      });
+      return;
     }
 
     // Serialize and append generated ICE Candidates to Supabase
@@ -72,6 +100,14 @@ class WebRTCStreamHandler {
           'type': 'candidate_tablet',
           'payload': candidate.toMap()
         });
+      }
+    };
+
+    // Listen for ICE Disconnects so we can log and gracefully wait for the Dashboard's ICE Restart offer
+    _peerConnection!.onIceConnectionState = (RTCIceConnectionState state) {
+      if (state == RTCIceConnectionState.RTCIceConnectionStateDisconnected ||
+          state == RTCIceConnectionState.RTCIceConnectionStateFailed) {
+        debugPrint("ICE Connection Lost (\$state). Waiting for Dashboard to initiate ICE Restart...");
       }
     };
     
@@ -160,6 +196,8 @@ class WebRTCStreamHandler {
     
     // RETURN CAMERA TO BACKGROUND TELEMETRY SERVICE
     const platform = MethodChannel('com.facetracker/control');
-    platform.invokeMethod('resumeCamera');
+    platform.invokeMethod('resumeCamera').catchError((e) {
+      debugPrint("WARNING: resumeCamera timed out or failed: $e");
+    });
   }
 }
