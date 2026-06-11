@@ -6,6 +6,7 @@ import 'package:flutter_webrtc/flutter_webrtc.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:uuid/uuid.dart';
+import 'dart:io';
 import '../telemetry/webrtc_stream_handler.dart';
 
 const Color emeraldColor = Color(0xFF10B981);
@@ -34,6 +35,7 @@ class _DashboardScreenState extends State<DashboardScreen> with SingleTickerProv
   bool _isSessionActive = false;
   int _elapsedSeconds = 0;
   Timer? _timer;
+  double _currentMemoryMb = 0.0;
 
   bool _isDbConnected = false;
   String _selectedSubject = 'Physics';
@@ -190,6 +192,7 @@ class _DashboardScreenState extends State<DashboardScreen> with SingleTickerProv
       _timer = Timer.periodic(const Duration(seconds: 1), (timer) {
         setState(() {
           _elapsedSeconds++;
+          _currentMemoryMb = ProcessInfo.currentRss / (1024 * 1024);
         });
       });
     }
@@ -313,6 +316,22 @@ class _DashboardScreenState extends State<DashboardScreen> with SingleTickerProv
                         ),
                       ),
                       if (_isSessionActive) ...[
+                        const SizedBox(height: 16),
+                        Row(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: [
+                            const Icon(Icons.memory, color: Colors.blueAccent, size: 16),
+                            const SizedBox(width: 6),
+                            Text(
+                              "RAM: ${_currentMemoryMb.toStringAsFixed(1)} MB",
+                              style: const TextStyle(
+                                color: Colors.blueAccent,
+                                fontWeight: FontWeight.bold,
+                                fontSize: 14,
+                              ),
+                            ),
+                          ],
+                        ),
                         const SizedBox(height: 16),
                         Text(
                           "$_liveScore%",
