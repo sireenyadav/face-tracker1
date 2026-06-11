@@ -63,6 +63,19 @@ class WebRTCStreamHandler {
         });
       }
     };
+    
+    // Check if parent already sent an offer while we were initializing camera
+    final existingOffer = await _supabase
+        .from('webrtc_signaling')
+        .select()
+        .eq('session_id', sessionId)
+        .eq('type', 'offer_parent')
+        .order('created_at', ascending: false)
+        .limit(1);
+        
+    if (existingOffer.isNotEmpty) {
+      await _handleOffer(existingOffer[0]['payload']);
+    }
 
     // Listen to Supabase Realtime for parent incoming offers and candidate exchanges
     _supabase

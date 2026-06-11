@@ -8,6 +8,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:uuid/uuid.dart';
 import 'dart:io';
 import '../telemetry/webrtc_stream_handler.dart';
+import 'video_ambush_screen.dart';
 
 const Color emeraldColor = Color(0xFF10B981);
 
@@ -36,6 +37,7 @@ class _DashboardScreenState extends State<DashboardScreen> with SingleTickerProv
   int _elapsedSeconds = 0;
   Timer? _timer;
   double _currentMemoryMb = 0.0;
+  String _currentSessionId = "";
 
   bool _isDbConnected = false;
   String _selectedSubject = 'Physics';
@@ -62,8 +64,8 @@ class _DashboardScreenState extends State<DashboardScreen> with SingleTickerProv
       CurvedAnimation(parent: _pulseController, curve: Curves.easeInOut),
     );
 
-    // Setup MethodChannel listener for incoming video requests from native Android layer
-    platform.setMethodCallHandler(_handleNativeMethodCall);
+    // Remove old method channel listener
+    // platform.setMethodCallHandler(_handleNativeMethodCall);
   }
 
   void _checkSupabaseConnection() async {
@@ -75,17 +77,28 @@ class _DashboardScreenState extends State<DashboardScreen> with SingleTickerProv
     }
   }
 
-  Future<dynamic> _handleNativeMethodCall(MethodCall call) async {
-    if (call.method == "onVideoRequest") {
-      // The native 5-second polling loop caught a video_request == true flag
-      _triggerVideoAmbushOverlay();
-    }
+  void _listenForVideoRequests(String sessionId) {
+    Supabase.instance.client.channel('signaling_trigger_$sessionId').onPostgresChanges(
+      event: PostgresChangeEvent.insert,
+      schema: 'public',
+      table: 'webrtc_signaling',
+      filter: PostgresChangeFilter(
+        type: PostgresChangeFilterType.eq,
+        column: 'session_id',
+        value: sessionId,
+      ),
+      callback: (payload) {
+        if (payload.newRecord['type'] == 'offer_parent') {
+          _triggerVideoAmbushOverlay(sessionId);
+        }
+      }
+    ).subscribe();
   }
 
-  void _triggerVideoAmbushOverlay() {
+  void _triggerVideoAmbushOverlay(String sessionId) {
     Navigator.of(context).push(
       MaterialPageRoute(
-        builder: (context) => const VideoAmbushScreen(),
+        builder: (context) => VideoAmbushScreen(sessionId: sessionId),
         fullscreenDialog: true,
       ),
     );
@@ -122,6 +135,10 @@ class _DashboardScreenState extends State<DashboardScreen> with SingleTickerProv
       _pulseController.reset();
       
       try {
+        Supabase.instance.client.removeChannel(Supabase.instance.client.channel('signaling_trigger_$_currentSessionId'));
+      } catch (_) {}
+      
+      try {
         await platform.invokeMethod('stopService');
       } on PlatformException catch (e) {
         debugPrint("Failed to stop session: '${e.message}'.");
@@ -147,14 +164,14 @@ class _DashboardScreenState extends State<DashboardScreen> with SingleTickerProv
         _liveState = "Initializing...";
         _syncStatus = "Awaiting Sync...";
         _isSessionActive = true;
+        _currentSessionId = const Uuid().v4();
       });
       
       _pulseController.repeat(reverse: true);
       
       try {
-        final sessionId = const Uuid().v4();
         final configJson = jsonEncode({
-          "sessionId": sessionId,
+          "sessionId": _currentSessionId,
           "subjectTag": _selectedSubject,
           "targetExam": "JEE",
           "activityType": _activityType,
@@ -195,6 +212,8 @@ class _DashboardScreenState extends State<DashboardScreen> with SingleTickerProv
           _currentMemoryMb = ProcessInfo.currentRss / (1024 * 1024);
         });
       });
+        
+      _listenForVideoRequests(_currentSessionId);
     }
   }
 
