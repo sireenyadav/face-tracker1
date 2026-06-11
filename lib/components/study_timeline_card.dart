@@ -82,7 +82,7 @@ class StudyTimelineCard extends StatelessWidget {
                     Icon(
                       isActive ? Icons.circle : Icons.access_time, 
                       size: 12, 
-                      color: isActive ? Colors.emerald : (isDark ? Colors.white54 : Colors.black54),
+                      color: isActive ? Colors.green : (isDark ? Colors.white54 : Colors.black54),
                     ),
                     const SizedBox(width: 4),
                     Text(
